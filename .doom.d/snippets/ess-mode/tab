@@ -1,0 +1,13 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: tab
+# key: tab
+# group: SAS
+# contributor: Edwin Hu
+# mode: ess-mode
+# condition: (string= ess-language "SAS")
+# type: snippet
+# --
+$0proc tabulate data=${1:&syslast.};
+    var $2;
+    table ($2),(mean std min p25 p50 p75 max);
+run;

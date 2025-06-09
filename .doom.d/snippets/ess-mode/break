@@ -1,0 +1,10 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: break
+# key: break
+# group: SAS
+# contributor: Edwin Hu
+# mode: ess-mode
+# condition: (string= ess-language "SAS")
+# type: snippet
+# --
+$0*'; *"; *); */; %mend; run;quit;

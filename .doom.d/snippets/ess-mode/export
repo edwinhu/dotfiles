@@ -1,0 +1,14 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: export
+# key: export
+# group: SAS
+# contributor: Edwin Hu
+# mode: ess-mode
+# condition: (string= ess-language "SAS")
+# type: snippet
+# --
+$0PROC EXPORT DATA=${1:&syslast.}
+    OUTFILE='$2'
+    DBMS=${3:CSV}
+    REPLACE;
+RUN;

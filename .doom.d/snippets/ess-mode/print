@@ -1,0 +1,10 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: print
+# key: print
+# group: SAS
+# contributor: Edwin Hu
+# mode: ess-mode
+# condition: (string= ess-language "SAS")
+# type: snippet
+# --
+$0proc print data=${1:&syslast.}(obs=${2:25}) width=min;run;

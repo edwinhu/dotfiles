@@ -1,0 +1,14 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: import
+# key: import
+# group: SAS
+# contributor: Edwin Hu
+# mode: ess-mode
+# condition: (string= ess-language "SAS")
+# type: snippet
+# --
+$0PROC IMPORT DATAFILE='$1'
+    DBMS=${2:CSV}
+    OUT=$3;
+    GUESSINGROWS=MAX;
+RUN;

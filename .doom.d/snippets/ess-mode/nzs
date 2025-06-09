@@ -1,0 +1,20 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: nzs
+# key: nzs
+# group: SAS
+# contributor: Edwin Hu
+# mode: ess-mode
+# condition: (string= ess-language "SAS")
+# type: snippet
+# --
+$0proc sql;
+    connect to netezza as nz
+        (server='d2-sec-prdnzp-mako-vip'
+        database='DERAPRD'
+        user=hue password="&nzpass.");
+    ${1: create table ${2:} as} 
+    select ${3:*}
+        from connection to nz
+        (select ${4:*} from ${5:};)
+    ;
+quit;

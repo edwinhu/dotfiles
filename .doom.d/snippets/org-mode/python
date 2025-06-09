@@ -1,0 +1,10 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: python block
+# key: <py
+# contributor: Edwin Hu
+# mode: org
+# type: snippet
+# --
+#+BEGIN_SRC python :var outfile="${1:$$(let ((temporary-file-directory "./")) (make-temp-file "py" nil ".png"))}"
+$0
+#+END_SRC

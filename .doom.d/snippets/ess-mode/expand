@@ -1,0 +1,14 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: expand
+# key: expand
+# group: SAS
+# contributor: Edwin Hu
+# mode: ess-mode
+# condition: (string= ess-language "SAS")
+# type: snippet
+# --
+$0proc expand data=${1:&syslast.} out=$2
+    method=none;
+    by ${3:permno};
+    convert $4 = $5 / transformout = ($6) ;
+run;
