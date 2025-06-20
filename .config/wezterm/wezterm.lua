@@ -13,7 +13,10 @@ config.enable_tab_bar = true
 config.integrated_title_button_style = "MacOsNative"
 config.integrated_title_button_color = "Auto"
 config.enable_scroll_bar = true
-config.dpi = 96
+config.dpi_by_screen = {
+	["Built-in Display"] = 96, -- Example value for a retina display
+	["Studio Display"] = 144,
+}
 
 config.leader = { key = "s", mods = "CTRL", timeout_milliseconds = 1000 } -- Set CTRL-a as the leader key.
 
