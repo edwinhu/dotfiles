@@ -1,8 +1,5 @@
-;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
-
-;; Place your private configuration here! Remember, you do not need to run 'doom
+;;; $DOOMDIR/config.el -*- lexical-binding: t; -*- Place your private configuration here! Remember, you do not need to run 'doom
 ;; sync' after modifying this file!
-
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
@@ -70,20 +67,20 @@
 ;; Gptel
 (use-package! gptel
  :config
-(setq gptel-model 'gpt-4.1
+ (setq gptel-model 'gpt-4.1
       gptel-backend (gptel-make-gh-copilot "Copilot")))
 
 ;; org-roam
 ;; (setq org-roam-directory "~/org-roam")
 
-;; Include SAS and R support
-;; (use-package! ob-sas
-;;   :load-path "~/.doom.d/")
-;; (org-babel-do-load-languages
-;;  'org-babel-load-languages
-;;  '((sas . t)
-;;    (R . t) ))
-;; (add-to-list 'org-src-lang-modes '("sas" . SAS))
+;; Include SAS support
+(use-package! ob-sas
+  :load-path "~/.doom.d/")
+(org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((sas . t)
+   ))
+(add-to-list 'org-src-lang-modes '("sas" . SAS))
 
 ;; Edit in same window
 ;; Doom now treats these buffers as pop-ups
@@ -102,45 +99,6 @@
 ;; org hide markers
 (setq org-hide-emphasis-markers t)
 
-;; proj vterm send
-(defun proj-vterm-send-line-or-region (&optional step)
-  (interactive ())
-  (setq projectile--proj-term-name
-        (concat "*vterm " (projectile-project-name
-                           (projectile-ensure-project
-                            (projectile-project-root))) "*"))
-  (let ((proc (get-buffer-process projectile--proj-term-name))
-        pbuf min max command)
-    (unless proc
-      (let ((currbuff (current-buffer)))
-        (vterm projectile--proj-term-name)
-        (switch-to-buffer currbuff)
-        (setq proc (get-buffer-process projectile--proj-term-name))
-        ))
-    (setq pbuff (process-buffer proc))
-    (if (use-region-p)
-        (setq min (region-beginning)
-              max (region-end))
-      (setq min (point-at-bol)
-            max (point-at-eol)))
-    (setq command (concat (buffer-substring min max) "\n"))
-    (with-current-buffer pbuff
-      (goto-char (process-mark proc))
-      (vterm-send-string command)
-      (move-marker (process-mark proc) (point))
-      ) ;;pop-to-buffer does not work with save-current-buffer -- bug?
-    (display-buffer (process-buffer proc) t)
-    (when step
-      (goto-char max)
-      (next-line))
-    ))
-(defun proj-vterm-send-line-or-region-and-step ()
-  (interactive)
-  (proj-vterm-send-line-or-region t))
-(defun proj-vterm-switch-to-process-buffer ()
-  (interactive)
-  (pop-to-buffer (process-buffer (get-buffer-process projectile--proj-term-name)) t))
-
 ;; unfill
 (defun unfill-paragraph (&optional region)
   "Takes a multi-line paragraph and makes it into a single line of text."
@@ -152,6 +110,20 @@
 
 ;; need to have exec-path-from-shell in order to get PATH
 (exec-path-from-shell-initialize)
+
+;; eval-in-repl
+(use-package! eval-in-repl)
+(setq eir-repl-placement 'left)
+;; python support
+(use-package! eval-in-repl-python)
+(add-hook 'python-mode-hook
+          '(lambda ()
+             (local-set-key (kbd "<C-return>") 'eir-eval-in-python)))
+;; Shell support
+(use-package! eval-in-repl-shell)
+(add-hook 'sh-mode-hook
+          '(lambda()
+             (local-set-key (kbd "C-<return>") 'eir-eval-in-shell)))
 
 ;; keybindings
 (load! "bindings")

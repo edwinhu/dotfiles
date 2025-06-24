@@ -15,6 +15,7 @@ config.integrated_title_button_color = "Auto"
 config.enable_scroll_bar = true
 config.dpi_by_screen = {
 	["Built-in Display"] = 96, -- Example value for a retina display
+	["DELL U3419W"] = 96,
 	["Studio Display"] = 144,
 }
 

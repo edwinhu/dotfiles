@@ -19,6 +19,7 @@
 ;(package! some-package)
 (package! mixed-pitch)
 (package! exec-path-from-shell)
+(package! eval-in-repl)
 (package! gptel :recipe (:nonrecursive t))
 
 ;; To install a package directly from a particular repo, you'll need to specify

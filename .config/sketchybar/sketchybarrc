@@ -124,7 +124,7 @@ sketchybar -m --add item network_up right \
                                  icon.highlight_color=0xffffffff \
                                  update_freq=1
 
-sketchybar --reorder clock battery volume music ram network_up network_down
+sketchybar --reorder clock battery volume music ram_percentage network_up network_down
 
 ##### Force all scripts to run the first time (never do this in a script) #####
 sketchybar --update
