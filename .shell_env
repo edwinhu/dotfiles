@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Shell environment variables and PATH configuration
+
+# Source nix profiles if they exist
+if [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+    . /nix/var/nix/profiles/default/etc/profile.d/nix.sh
+fi
+
+# Add custom paths AFTER nix.sh resets the PATH
+export PATH="$HOME/.local/share/bin:$HOME/go/bin:$HOME/.npm-packages/bin:$HOME/bin:$HOME/.pnpm-packages/bin:$HOME/.pnpm-packages:$PATH"
+
+# Editor configuration
+export EDITOR="nvim"
+export VISUAL="nvim"
+export ALTERNATE_EDITOR=""
+
+# History settings
+export HISTIGNORE="pwd:ls:cd"

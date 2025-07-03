@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Common shell configuration for both bash and zsh
+
+# Get the directory where this file is located
+DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
+
+# Source environment variables and PATH
+if [[ -f "$DOTFILES_DIR/.shell_env" ]]; then
+    source "$DOTFILES_DIR/.shell_env"
+fi
+
+# Source aliases
+if [[ -f "$DOTFILES_DIR/.shell_aliases" ]]; then
+    source "$DOTFILES_DIR/.shell_aliases"
+fi
