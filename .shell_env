@@ -17,3 +17,6 @@ export ALTERNATE_EDITOR=""
 
 # History settings
 export HISTIGNORE="pwd:ls:cd"
+
+# Suppress zoxide doctor warning
+export _ZO_DOCTOR=0
