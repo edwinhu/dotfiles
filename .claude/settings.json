@@ -1,0 +1,14 @@
+{
+  "allowed_commands": [
+    "echo",
+    "printf",
+    "tail",
+    "ls",
+    "xan",
+    "fd",
+    "rg",
+    "git",
+    "gh",
+    "pixi"
+  ]
+}
