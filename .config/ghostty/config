@@ -108,3 +108,4 @@ quit-after-last-window-closed = true
 
 # Mouse
 mouse-hide-while-typing = true
+keybind = shift+enter=text:\n
