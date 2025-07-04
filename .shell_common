@@ -13,3 +13,8 @@ fi
 if [[ -f "$DOTFILES_DIR/.shell_aliases" ]]; then
     source "$DOTFILES_DIR/.shell_aliases"
 fi
+
+# Initialize zoxide (must be last to avoid configuration warnings)
+if command -v zoxide &> /dev/null; then
+    eval "$(zoxide init zsh --cmd cd)"
+fi
