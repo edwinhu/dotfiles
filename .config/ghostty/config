@@ -102,10 +102,12 @@ keybind = ctrl+shift+k=clear_screen
 # Quick Terminal Toggle (if supported)
 keybind = global:ctrl+grave_accent=toggle_quick_terminal
 
+# Newlines in Claude Code
+keybind = shift+enter=text:\n
+
 # Window behavior
 confirm-close-surface = false
 quit-after-last-window-closed = true
 
 # Mouse
 mouse-hide-while-typing = true
-keybind = shift+enter=text:"\n"
