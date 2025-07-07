@@ -16,7 +16,6 @@ This repository contains my dotfiles and configuration for various development t
 │   ├── nixpkgs/         # Nix package manager config
 │   ├── nvim/            # Neovim configuration (LazyVim)
 │   ├── sioyek/          # PDF reader configuration
-│   ├── sketchybar/      # macOS status bar
 │   └── wezterm/         # WezTerm terminal configuration
 ├── .doom.d/             # Doom Emacs configuration
 ├── .shell_aliases       # Shell aliases
@@ -45,7 +44,6 @@ This repository contains my dotfiles and configuration for various development t
 ### System Tools
 
 - **Karabiner** (`.config/karabiner/`): Advanced keyboard customization for macOS
-- **Sketchybar** (`.config/sketchybar/`): Customizable macOS status bar
 - **Sioyek** (`.config/sioyek/`): PDF reader optimized for research papers
 
 ## Installation
