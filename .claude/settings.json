@@ -10,5 +10,8 @@
     "git",
     "gh",
     "pixi"
-  ]
+  ],
+  "env": {
+    "_ZO_DOCTOR": "0"
+  }
 }
