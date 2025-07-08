@@ -68,3 +68,7 @@ dotfiles/
 - Sources nix-darwin profiles for package availability
 - Works with both bash and zsh
 - Custom PATH additions for user-specific directories remain in `.shell_env`
+
+### Marimo Notebooks
+- When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
+- These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
