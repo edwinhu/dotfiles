@@ -1,0 +1,16 @@
+{
+  "openAsPage": "mod+shift+p",
+  "inlineLitNoteLink": "mod+shift+i",
+  "insertInline": "mod+shift+l",
+  "citationReferenceDB": "paperpile.bib",
+  "smartsearch": false,
+  "indexAbstracts": false,
+  "templatePage": "paperpile",
+  "templateBlock": "paperpile-block",
+  "linkAlias": "",
+  "pageTitle": "{author} ({date}) - {title}",
+  "reindexOnStartup": false,
+  "fileTemplate": "[{title}](file:../../../../../Library/CloudStorage/GoogleDrive-eddyhu@gmail.com/My Drive/Paperpile/{fileLink})",
+  "resultsCount": 50,
+  "disabled": false
+}

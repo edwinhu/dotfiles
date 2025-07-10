@@ -1,0 +1,6 @@
+{:logseq-bullet-threading {:version "v1.1.4", :repo "pengx17/logseq-plugin-bullet-threading", :effect false, :theme false}
+ :logseq-citation-manager {:version "v3.2.0", :repo "sawhney17/logseq-citation-manager", :effect true, :theme false}
+ :logseq-open-in-code {:version "v0.0.7", :repo "rebornix/logseq-open-in-code", :effect true, :theme false}
+ :logseq-kanban-board {:version "v1.18.0", :repo "sethyuan/logseq-plugin-kanban-board", :effect true, :theme false}
+ :logseq-catppuccin {:version "v0.6.4", :repo "catppuccin/logseq", :effect false, :theme true}
+ :logseq-readwise-official-plugin {:version "v1.4.11", :repo "readwiseio/logseq-readwise-official-plugin", :effect true, :theme false}}
