@@ -18,6 +18,7 @@ This repository contains my dotfiles and configuration for various development t
 │   ├── sioyek/          # PDF reader configuration
 │   └── wezterm/         # WezTerm terminal configuration
 ├── .doom.d/             # Doom Emacs configuration
+├── .logseq/             # Logseq configuration and plugins
 ├── .shell_aliases       # Shell aliases
 ├── .shell_common        # Common shell configuration
 └── .shell_env           # Environment variables
@@ -45,6 +46,7 @@ This repository contains my dotfiles and configuration for various development t
 
 - **Karabiner** (`.config/karabiner/`): Advanced keyboard customization for macOS
 - **Sioyek** (`.config/sioyek/`): PDF reader optimized for research papers
+- **Logseq** (`.logseq/`): Knowledge management and note-taking system with citation manager
 
 ## Installation
 
@@ -109,6 +111,17 @@ The configuration includes various helpful aliases and functions. Some notable o
 - Git shortcuts and aliases
 - Directory navigation helpers
 - Development workflow optimizations
+
+## Dependencies
+
+### Google Drive Integration
+
+Some applications depend on Google Drive being synced at a specific relative location:
+
+- **Sioyek**: The PDF reader's shared database (`.config/sioyek/shared.db`) is symlinked to `~/Library/CloudStorage/GoogleDrive-*/My Drive/resources/sioyek/shared.db` for syncing annotations across devices
+- **Logseq Citation Manager**: References PDFs stored in `~/Library/CloudStorage/GoogleDrive-*/My Drive/Paperpile/` for paper attachments
+
+These paths use relative symlinks for portability, but require Google Drive to be set up with the same folder structure.
 
 ## Notes
 
