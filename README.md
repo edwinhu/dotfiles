@@ -118,10 +118,10 @@ The configuration includes various helpful aliases and functions. Some notable o
 
 Some applications depend on Google Drive being synced at a specific relative location:
 
-- **Sioyek**: The PDF reader's shared database (`.config/sioyek/shared.db`) is symlinked to `~/Library/CloudStorage/GoogleDrive-*/My Drive/resources/sioyek/shared.db` for syncing annotations across devices
+- **Sioyek**: The PDF reader's shared database (`.config/sioyek/shared.db`) is no longer synced via Google Drive. Annotations are managed locally.
 - **Logseq Citation Manager**: References PDFs stored in `~/Library/CloudStorage/GoogleDrive-*/My Drive/Paperpile/` for paper attachments
 
-These paths use relative symlinks for portability, but require Google Drive to be set up with the same folder structure.
+For Logseq, the paths use relative symlinks for portability, but require Google Drive to be set up with the same folder structure.
 
 ## Notes
 
