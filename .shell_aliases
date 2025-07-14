@@ -15,6 +15,7 @@ alias lg='lazygit'
 
 # Sioyek-Readwise sync
 alias sioyek-sync='/Users/vwh7mb/projects/sioyek-readwise-sync/sync'
+alias sioyek='/Users/vwh7mb/projects/sioyek-readwise-sync/sioyek-sync-wrapper'
 
 # eza (better ls) aliases
 alias ls='eza --color=always --group-directories-first --icons'

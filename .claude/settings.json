@@ -1,16 +1,29 @@
 {
-  "allowed_commands": [
-    "echo",
-    "printf",
-    "tail",
-    "ls",
-    "xan",
-    "fd",
-    "rg",
-    "git",
-    "gh",
-    "pixi"
-  ],
+  "permissions": {
+    "allow": [
+      "Bash(echo:*)",
+      "Bash(printf:*)",
+      "Bash(tail:*)",
+      "Bash(ls:*)",
+      "Bash(xan:*)",
+      "Bash(fd:*)",
+      "Bash(rg:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(pixi:*)",
+      "Bash(wezterm:*)",
+      "Bash(nix:*)",
+      "Bash(cd:*)",
+      "Bash(pwd)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(which:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)"
+    ]
+  },
   "env": {
     "_ZO_DOCTOR": "0"
   }

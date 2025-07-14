@@ -3,10 +3,9 @@
 
 # Source nix profiles if they exist
 if [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
-    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-    . /nix/var/nix/profiles/default/etc/profile.d/nix.sh
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  . /nix/var/nix/profiles/default/etc/profile.d/nix.sh
 fi
 
 # Add custom paths AFTER nix.sh resets the PATH
-export PATH="$HOME/.local/share/bin:$HOME/go/bin:$HOME/.npm-packages/bin:$HOME/bin:$HOME/.pnpm-packages/bin:$HOME/.pnpm-packages:$PATH"
-
+export PATH="$HOME/.local/share/bin:$HOME/.pixi/bin:$HOME/.npm-packages/bin:$HOME/bin:$HOME/.pnpm-packages/bin:$HOME/.pnpm-packages:$PATH"
