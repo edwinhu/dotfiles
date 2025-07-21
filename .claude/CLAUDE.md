@@ -9,7 +9,7 @@ The following additional command line tools are available for use:
 - `xan` - CSV analysis tool
 - `fd` - Fast file finder
 - `gh copilot` - GitHub Copilot CLI for sub-agent tasks (Usage: `gh copilot [explain|suggest] "{PROMPT}"`)
-- `gemini` - GitHub Copilot CLI for sub-agent tasks (Usage: `gemini -p "{PROMPT}"`)
+- `gemini` - Gemini CLI for sub-agent tasks (Usage: `gemini -p "{PROMPT}"`)
 - `wezterm` - Terminal emulator with advanced features
 
 ## Package Management
@@ -41,3 +41,4 @@ nix run .#build-switch
 4. Check `pixi.toml` before suggesting any Python/R package installations
 5. System-level changes should be made through nix-darwin configuration
 6. Report times in EST even if logs are in UTC.
+7. Always remember to clean up after yourself, especially with temporary files or directories.

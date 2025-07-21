@@ -58,6 +58,8 @@ config.keys = {
 	{ mods = "LEADER", key = "j", action = act.ActivatePaneDirection("Down") },
 	{ mods = "LEADER", key = "k", action = act.ActivatePaneDirection("Up") },
 	{ mods = "LEADER", key = "l", action = act.ActivatePaneDirection("Right") },
+	-- Newline in Claude Code
+	{ mods = "SHIFT", key = "Enter", action = act.SendString("\n") },
 }
 
 -- SSH Domains
