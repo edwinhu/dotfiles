@@ -9,3 +9,13 @@ fi
 
 # Add custom paths AFTER nix.sh resets the PATH
 export PATH="$HOME/.local/share/bin:$HOME/.pixi/bin:$HOME/.npm-packages/bin:$HOME/bin:$HOME/.pnpm-packages/bin:$HOME/.pnpm-packages:$PATH"
+
+# Source home-manager session variables
+if [[ -f "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]]; then
+  . "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
+fi
+
+# Source agenix environment variables
+if [[ -f "$HOME/.config/agenix-env.sh" ]]; then
+  . "$HOME/.config/agenix-env.sh"
+fi
