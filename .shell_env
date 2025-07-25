@@ -15,7 +15,5 @@ if [[ -f "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]]; then
   . "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
 fi
 
-# Source agenix environment variables
-if [[ -f "$HOME/.config/agenix-env.sh" ]]; then
-  . "$HOME/.config/agenix-env.sh"
-fi
+# Agenix environment variables are handled by home-manager
+# They are automatically sourced via hm-session-vars.sh
