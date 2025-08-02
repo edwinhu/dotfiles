@@ -33,12 +33,19 @@ To rebuild the system configuration after changes:
 nix run .#build-switch
 ```
 
+### Taking Notes
+
+If I ask you to write up notes, write them up in markdown format and append to the file in `~/Documents/Notes/foam/journals/{YYYY-MM-DD}.md`, under the heading # Work, and start the heading level at ##.
+
+I use the VSCode Foam extension for note-taking, so please follow the Foam conventions.
+
 ## Best Practices
 
 1. Always implement centralized file-based logging for debugging and information purposes.
-2. Use `rg` instead of `grep` for file searching when possible (it's faster)
-3. Use `fd` instead of `find` for locating files
-4. Check `pixi.toml` before suggesting any Python/R package installations
-5. System-level changes should be made through nix-darwin configuration
-6. Report times in EST even if logs are in UTC.
-7. Always remember to clean up after yourself, especially with temporary files or directories.
+2. Use parallel subagents wherever possible. Write AGENTS#.md files to share information between agents.
+3. Use `rg` instead of `grep` for file searching when possible (it's faster)
+4. Use `fd` instead of `find` for locating files
+5. Check `pixi.toml` before suggesting any Python/R package installations
+6. System-level changes should be made through nix-darwin configuration
+7. Report times in EST even if logs are in UTC.
+8. Always remember to clean up after yourself, especially with temporary files or directories.
