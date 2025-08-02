@@ -39,6 +39,8 @@ If I ask you to write up notes, write them up in markdown format and append to t
 
 I use the VSCode Foam extension for note-taking, so please follow the Foam conventions.
 
+Unless I specify otherwise, write up notes based on the current chat context (e.g., what we have just been working on) or the most recent git commit, if applicable, and at most the git commit history for the last 24 hours.
+
 ## Best Practices
 
 1. Always implement centralized file-based logging for debugging and information purposes.
