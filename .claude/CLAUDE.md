@@ -35,7 +35,7 @@ nix run .#build-switch
 
 ### Taking Notes
 
-If I ask you to write up notes, write them up in markdown format and append to the file in `~/Documents/Notes/foam/journals/{YYYY-MM-DD}.md`, under the heading # Work, and start the heading level at ##.
+If I ask you to write up notes, write them up in markdown format and append to the file in `~/Documents/Notes/foam/journals/{YYYY-MM-DD}.md`, under the appropriate heading (e.g., # Work, # Reading, # Meetings, or # To-Dos) and start the heading level at ##.
 
 I use the VSCode Foam extension for note-taking, so please follow the Foam conventions.
 

@@ -22,6 +22,9 @@
       "Bash(which:*)",
       "Bash(curl:*)",
       "Bash(wget:*)"
+    ],
+    "additionalDirectories": [
+      "~/Documents/Notes/foam/"
     ]
   },
   "env": {
