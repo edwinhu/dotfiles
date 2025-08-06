@@ -49,9 +49,6 @@
 ;; You can also try 'gd' (or 'C-c g d') to jump to their definition and see how
 ;; they are implemented.
 
-;; Change font
-(setq doom-font (font-spec :family "Menlo" :size 14))
-
 ;; Enable helm keyboard navigation
 (customize-set-variable 'helm-ff-lynx-style-map t)
 
@@ -75,6 +72,18 @@
 
   ;; Optional: Set eat as the default terminal
   (setq eat-term-name "xterm-256color:Tc")
+  
+  ;; Fix whitespace display in eat terminal
+  (add-hook 'eat-mode-hook
+            (lambda ()
+              ;; Disable whitespace-mode completely
+              (whitespace-mode -1)
+              ;; Turn off trailing whitespace highlighting
+              (setq-local show-trailing-whitespace nil)
+              ;; Disable tab highlighting
+              (setq-local indent-tabs-mode nil)
+              ;; Clear any whitespace style settings
+              (setq-local whitespace-style nil)))
 
   ;; Optional keybindings
   :bind (("C-c t" . eat)
@@ -83,6 +92,18 @@
 
 ;; Replace vterm with eat
 (setq +term-backend 'eat)
+
+;; Disable whitespace visualization in terminal modes globally
+(add-hook 'term-mode-hook
+          (lambda ()
+            (setq-local show-trailing-whitespace nil)
+            (whitespace-mode -1)))
+
+;; Also ensure vterm doesn't show whitespace
+(add-hook 'vterm-mode-hook
+          (lambda ()
+            (setq-local show-trailing-whitespace nil)
+            (whitespace-mode -1)))
 
 ;; Claude Code
 (use-package claude-code-ide
