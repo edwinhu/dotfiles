@@ -80,31 +80,16 @@
               (whitespace-mode -1)
               (setq-local show-trailing-whitespace nil)
               (setq-local nobreak-char-display nil)
-              ;; Create buffer display table to replace problematic Unicode ranges
+              ;; Replace only the most problematic emoji-rendered characters
               (let ((dt (or buffer-display-table (make-display-table))))
-                ;; Claude Code commonly uses these Unicode ranges that get emoji-fied:
-                ;; Miscellaneous Symbols (U+2600-U+26FF) - warnings, stars, etc.
-                (dotimes (i (- #x26FF #x2600))
-                  (let ((char (+ #x2600 i)))
-                    (aset dt char [?*])))  ; Replace with asterisk
-                ;; Dingbats (U+2700-U+27BF) - check marks, crosses, etc.
-                (dotimes (i (- #x27BF #x2700))
-                  (let ((char (+ #x2700 i)))
-                    (aset dt char [?+])))  ; Replace with plus
-                ;; Miscellaneous Symbols and Arrows (U+2B00-U+2BFF) - more arrows/symbols
-                (dotimes (i (- #x2BFF #x2B00))
-                  (let ((char (+ #x2B00 i)))
-                    (aset dt char [?>])))  ; Replace with arrow
-                ;; Emoticons range (U+1F600-U+1F64F) and other emoji blocks
-                (dotimes (i (- #x1F64F #x1F600))
-                  (let ((char (+ #x1F600 i)))
-                    (aset dt char [?:])))  ; Replace with colon
-                ;; Miscellaneous Symbols and Pictographs (U+1F300-U+1F5FF)
-                (dotimes (i (- #x1F5FF #x1F300))
-                  (let ((char (+ #x1F300 i)))
-                    (aset dt char [?#])))  ; Replace with hash
-                ;; Keep specific useful ones - just the record symbol
-                (aset dt ?⏺ [?●])   ; Record symbol U+23FA
+                ;; Only replace characters that are definitely rendered as emojis
+                ;; Use vector format for display table entries
+                (aset dt ?⏺ [?●])    ; Record symbol - keep similar looking
+                (aset dt ?⭐ [?★])    ; Star - keep star but different variant
+                (aset dt ?❤ [?♥])    ; Heart - keep heart but different variant  
+                (aset dt ?✅ [?✓])    ; Check mark
+                (aset dt ?❌ [?✗])    ; Cross mark
+                (aset dt ?⚠ [?!])    ; Warning sign
                 (setq-local buffer-display-table dt))))
 
   ;; Optional keybindings
@@ -114,6 +99,7 @@
 
 ;; Replace vterm with eat
 (setq +term-backend 'eat)
+
 
 
 ;; Claude Code
