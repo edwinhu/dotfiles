@@ -90,6 +90,23 @@
                 (aset dt ?✅ [?✓])    ; Check mark
                 (aset dt ?❌ [?✗])    ; Cross mark
                 (aset dt ?⚠ [?!])    ; Warning sign
+                (aset dt ?✳ [?*])    ; Eight-spoked asterisk U+2733
+                ;; More common emoji substitutions
+                (aset dt ?⚡ [?~])    ; High voltage sign U+26A1
+                (aset dt ?🔥 [?~])    ; Fire U+1F525
+                (aset dt ?📁 [?□])    ; File folder U+1F4C1
+                (aset dt ?📂 [?□])    ; Open file folder U+1F4C2
+                (aset dt ?🔒 [?#])    ; Lock U+1F512
+                (aset dt ?🔓 [?o])    ; Open lock U+1F513
+                (aset dt ?⚙ [?@])     ; Gear U+2699
+                (aset dt ?🎯 [?o])    ; Direct hit U+1F3AF
+                (aset dt ?💡 [?!])    ; Light bulb U+1F4A1
+                (aset dt ?🚀 [?^])    ; Rocket U+1F680
+                (aset dt ?⭕ [?O])    ; Heavy large circle U+2B55
+                (aset dt ?➡ [?>])     ; Black rightwards arrow U+27A1
+                (aset dt ?⬅ [?<])     ; Leftwards black arrow U+2B05
+                (aset dt ?⬆ [?^])     ; Upwards black arrow U+2B06
+                (aset dt ?⬇ [?v])     ; Downwards black arrow U+2B07
                 (setq-local buffer-display-table dt))))
 
   ;; Optional keybindings
