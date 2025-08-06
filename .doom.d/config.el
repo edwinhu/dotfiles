@@ -16,13 +16,13 @@
 ;;
 ;; They all accept either a font-spec, font string ("Input Mono-12"), or xlfd
 ;; font string. You generally only need these two:
-(setq doom-font (font-spec :family "mono" :size 14)
+(setq doom-font (font-spec :family "JetBrains Mono" :size 14)
       doom-variable-pitch-font (font-spec :family "CMU Serif" :size 14))
 
 ;; There are two ways to load a theme. Both assume the theme is installed and
 ;; available. You can either set `doom-theme' or manually load a theme with the
 ;; `load-theme' function. This is the default:
-(setq doom-theme 'doom-moonlight)
+(setq doom-theme 'catppuccin)
 
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
@@ -74,7 +74,7 @@
   (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
 
   ;; Optional: Set eat as the default terminal
-  (setq eat-term-name "xterm-256color")
+  (setq eat-term-name "xterm-256color:Tc")
 
   ;; Optional keybindings
   :bind (("C-c t" . eat)
