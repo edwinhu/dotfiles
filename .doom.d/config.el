@@ -70,20 +70,18 @@
   ;; For `eat-eshell-visual-command-mode'.
   (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
 
-  ;; Optional: Set eat as the default terminal
-  (setq eat-term-name "xterm-256color:Tc")
+  ;; Use standard terminal type
+  (setq eat-term-name "xterm-256color")
   
-  ;; Fix whitespace display in eat terminal
+  ;; Fix display issues in eat terminal
   (add-hook 'eat-mode-hook
             (lambda ()
-              ;; Disable whitespace-mode completely
+              ;; Disable whitespace visualization
               (whitespace-mode -1)
-              ;; Turn off trailing whitespace highlighting
               (setq-local show-trailing-whitespace nil)
-              ;; Disable tab highlighting
-              (setq-local indent-tabs-mode nil)
-              ;; Clear any whitespace style settings
-              (setq-local whitespace-style nil)))
+              (setq-local nobreak-char-display nil)
+              ;; Clear buffer display table
+              (setq-local buffer-display-table nil)))
 
   ;; Optional keybindings
   :bind (("C-c t" . eat)
@@ -92,18 +90,6 @@
 
 ;; Replace vterm with eat
 (setq +term-backend 'eat)
-
-;; Disable whitespace visualization in terminal modes globally
-(add-hook 'term-mode-hook
-          (lambda ()
-            (setq-local show-trailing-whitespace nil)
-            (whitespace-mode -1)))
-
-;; Also ensure vterm doesn't show whitespace
-(add-hook 'vterm-mode-hook
-          (lambda ()
-            (setq-local show-trailing-whitespace nil)
-            (whitespace-mode -1)))
 
 ;; Claude Code
 (use-package claude-code-ide
