@@ -64,11 +64,32 @@
 ;; https://github.com/doomemacs/doomemacs/issues/7532
 ;; (add-hook 'doom-after-init-hook (lambda () (tool-bar-mode 1) (tool-bar-mode 0)))
 
-;; Gptel
-(use-package! gptel
- :config
- (setq gptel-model 'gpt-4.1
-      gptel-backend (gptel-make-gh-copilot "Copilot")))
+;; eat terminal
+(use-package eat
+  :config
+  ;; For `eat-eshell-mode'.
+  (add-hook 'eshell-load-hook #'eat-eshell-mode)
+
+  ;; For `eat-eshell-visual-command-mode'.
+  (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
+
+  ;; Optional: Set eat as the default terminal
+  (setq eat-term-name "xterm-256color")
+
+  ;; Optional keybindings
+  :bind (("C-c t" . eat)
+         ("C-c T" . eat-other-window))
+)
+
+;; Replace vterm with eat
+(setq +term-backend 'eat)
+
+;; Claude Code
+(use-package claude-code-ide
+  :bind ("C-c C-'" . claude-code-ide-menu)
+  :config
+  (claude-code-ide-emacs-tools-setup)
+  (setq claude-code-ide-terminal-backend 'eat))
 
 ;; org-roam
 ;; (setq org-roam-directory "~/org-roam")
@@ -117,12 +138,12 @@
 ;; python support
 (use-package! eval-in-repl-python)
 (add-hook 'python-mode-hook
-          '(lambda ()
+          #'(lambda ()
              (local-set-key (kbd "<C-return>") 'eir-eval-in-python)))
 ;; Shell support
 (use-package! eval-in-repl-shell)
 (add-hook 'sh-mode-hook
-          '(lambda()
+          #'(lambda()
              (local-set-key (kbd "C-<return>") 'eir-eval-in-shell)))
 
 ;; keybindings

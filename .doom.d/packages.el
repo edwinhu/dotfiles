@@ -20,7 +20,9 @@
 (package! mixed-pitch)
 (package! exec-path-from-shell)
 (package! eval-in-repl)
-(package! gptel :recipe (:nonrecursive t))
+(package! eat)
+(package! claude-code-ide
+  :recipe (:host github :repo "manzaltu/claude-code-ide.el"))
 
 ;; To install a package directly from a particular repo, you'll need to specify
 ;; a `:recipe'. You'll find documentation on what `:recipe' accepts here:
