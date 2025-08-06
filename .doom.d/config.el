@@ -80,8 +80,14 @@
               (whitespace-mode -1)
               (setq-local show-trailing-whitespace nil)
               (setq-local nobreak-char-display nil)
-              ;; Clear buffer display table
-              (setq-local buffer-display-table nil)))
+              ;; Create buffer display table to replace problematic Unicode
+              (let ((dt (or buffer-display-table (make-display-table))))
+                ;; Replace record symbol with simple dot
+                (aset dt ?⏺ [?●])  ; Replace U+23FA with bullet
+                (aset dt ?⏹ [?■])  ; Replace stop symbol
+                (aset dt ?⏸ [?‖])  ; Replace pause symbol
+                (aset dt ?▶ [?>])  ; Replace play symbol
+                (setq-local buffer-display-table dt))))
 
   ;; Optional keybindings
   :bind (("C-c t" . eat)
@@ -90,6 +96,7 @@
 
 ;; Replace vterm with eat
 (setq +term-backend 'eat)
+
 
 ;; Claude Code
 (use-package claude-code-ide
