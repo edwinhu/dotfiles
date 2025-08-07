@@ -186,8 +186,15 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   (claude-code-ide-emacs-tools-setup)
   (setq claude-code-ide-terminal-backend 'vterm))
 
-;; org-roam
-;; (setq org-roam-directory "~/org-roam")
+;; org-roam configuration
+(setq org-roam-directory "~/Documents/Notes/org-roam/")
+(setq org-roam-db-location "~/Documents/Notes/org-roam/org-roam.db")
+(setq org-roam-dailies-directory "journals/")
+(setq org-roam-dailies-capture-templates
+      '(("d" "default" entry
+         "* %?"
+         :target (file+head "%<%Y-%m-%d>.org"
+                            "#+title: %<%Y-%m-%d>\n"))))
 
 ;; Include SAS support
 (use-package! ob-sas

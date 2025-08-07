@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(~/.config/emacs/bin/doom sync:*)"
+    ],
+    "deny": []
+  }
+}

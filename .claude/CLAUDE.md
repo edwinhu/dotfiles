@@ -35,11 +35,11 @@ nix run .#build-switch
 
 ### Taking Notes
 
-If I ask you to write up notes, write them up in markdown format and append to the file in `~/Documents/Notes/foam/journals/{YYYY-MM-DD}.md`, under the appropriate heading (e.g., # Work, # Reading, # Meetings, or # To-Dos) and start the heading level at ##.
+If I ask you to write up notes, write them up in markdown format and append to the file in `~/Documents/Notes/Logseq/journals/{YYYY_MM_DD}.md`, under the appropriate heading (e.g., # Work, # Reading, # Meetings, or # To-Dos) and start the heading level at ##.
 
-I use the VSCode Foam extension for note-taking, so please follow the Foam conventions.
+I use Logseq for note-taking, which is slightly non-standard markdown. Logseq is an outliner. Each bullet (-) is a block, which you can best compare to a paragraph. Because Logseq is an outliner, every paragraph in Logseq is preceded by a bullet (-). Need more than a single paragraph? Create branches by grouping related blocks.
 
-Unless I specify otherwise, write up notes based on the current chat context (e.g., what we have just been working on) or the most recent git commit, if applicable, and at most the git commit history for the last 24 hours.
+Unless I specify otherwise, write up notes based on the current chat context (e.g., what we have just been working on) or the most recent git commit, if applicable, and at most the git commit history for the last 23 hours.
 
 ## Best Practices
 
