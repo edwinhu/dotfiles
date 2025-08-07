@@ -73,58 +73,118 @@
   ;; Use standard terminal type
   (setq eat-term-name "xterm-256color")
   
-  ;; Fix display issues in eat terminal
+  ;; Fix whitespace issues in eat terminal
   (add-hook 'eat-mode-hook
             (lambda ()
               ;; Disable whitespace visualization
-              (whitespace-mode -1)
+              (when (fboundp 'whitespace-mode) (whitespace-mode -1))
               (setq-local show-trailing-whitespace nil)
-              (setq-local nobreak-char-display nil)
-              ;; Replace only the most problematic emoji-rendered characters
-              (let ((dt (or buffer-display-table (make-display-table))))
-                ;; Only replace characters that are definitely rendered as emojis
-                ;; Use vector format for display table entries
-                (aset dt ?⏺ [?●])    ; Record symbol - keep similar looking
-                (aset dt ?⭐ [?★])    ; Star - keep star but different variant
-                (aset dt ?❤ [?♥])    ; Heart - keep heart but different variant  
-                (aset dt ?✅ [?✓])    ; Check mark
-                (aset dt ?❌ [?✗])    ; Cross mark
-                (aset dt ?⚠ [?!])    ; Warning sign
-                (aset dt ?✳ [?*])    ; Eight-spoked asterisk U+2733
-                ;; More common emoji substitutions
-                (aset dt ?⚡ [?~])    ; High voltage sign U+26A1
-                (aset dt ?🔥 [?~])    ; Fire U+1F525
-                (aset dt ?📁 [?□])    ; File folder U+1F4C1
-                (aset dt ?📂 [?□])    ; Open file folder U+1F4C2
-                (aset dt ?🔒 [?#])    ; Lock U+1F512
-                (aset dt ?🔓 [?o])    ; Open lock U+1F513
-                (aset dt ?⚙ [?@])     ; Gear U+2699
-                (aset dt ?🎯 [?o])    ; Direct hit U+1F3AF
-                (aset dt ?💡 [?!])    ; Light bulb U+1F4A1
-                (aset dt ?🚀 [?^])    ; Rocket U+1F680
-                (aset dt ?⭕ [?O])    ; Heavy large circle U+2B55
-                (aset dt ?➡ [?>])     ; Black rightwards arrow U+27A1
-                (aset dt ?⬅ [?<])     ; Leftwards black arrow U+2B05
-                (aset dt ?⬆ [?^])     ; Upwards black arrow U+2B06
-                (aset dt ?⬇ [?v])     ; Downwards black arrow U+2B07
-                (setq-local buffer-display-table dt))))
+              (setq-local nobreak-char-display nil)))
 
   ;; Optional keybindings
   :bind (("C-c t" . eat)
          ("C-c T" . eat-other-window))
 )
 
-;; Replace vterm with eat
-(setq +term-backend 'eat)
+;; vterm terminal configuration (separate from eat)
+(after! vterm
+  (add-hook 'vterm-mode-hook
+            (lambda ()
+              ;; Disable whitespace visualization
+              (when (fboundp 'whitespace-mode) (whitespace-mode -1))
+              (setq-local show-trailing-whitespace nil)
+              (setq-local nobreak-char-display nil))))
+
+;; Test vterm instead of eat for better Unicode handling
+(setq +term-backend 'vterm)
+
+;; Prevent global whitespace mode issues in terminals
+(after! whitespace
+  ;; Ensure whitespace mode doesn't interfere with terminals
+  (setq whitespace-global-modes '(not vterm-mode eat-mode term-mode)))
+
+;; Fix Unicode emoji substitution by overriding Doom's font configuration
+(defun fix-unicode-emoji-substitution ()
+  "Prevent technical Unicode symbols from rendering as color emoji.
+This function forces JetBrains Mono for ranges of Unicode characters
+that should be monospace but are often hijacked by Apple Color Emoji."
+  (when (fboundp 'set-fontset-font)
+    (let ((mono-font "JetBrains Mono"))
+      ;; Technical Symbols (U+2300-U+23FF)
+      ;; Includes: ⏸ ⏹ ⏺ ⏻ ⏼ ⏽ etc.
+      (set-fontset-font t '(#x2300 . #x23ff) mono-font)
+      
+      ;; Miscellaneous Technical (U+2300-U+23FF already covered above)
+      
+      ;; Geometric Shapes (U+25A0-U+25FF)
+      ;; Includes: ■ □ ▲ △ ▶ ▷ ◀ ◁ ● ○ etc.
+      (set-fontset-font t '(#x25a0 . #x25ff) mono-font)
+      
+      ;; Box Drawing (U+2500-U+257F)
+      ;; Includes: ─ │ ┌ ┐ └ ┘ ├ ┤ etc.
+      (set-fontset-font t '(#x2500 . #x257f) mono-font)
+      
+      ;; Block Elements (U+2580-U+259F)
+      ;; Includes: ▀ ▄ █ ▌ ▐ etc.
+      (set-fontset-font t '(#x2580 . #x259f) mono-font)
+      
+      ;; Arrows (U+2190-U+21FF)
+      ;; Includes: ← → ↑ ↓ ↔ ↕ etc.
+      (set-fontset-font t '(#x2190 . #x21ff) mono-font)
+      
+      ;; Mathematical Operators (U+2200-U+22FF)
+      ;; Includes: ∀ ∂ ∃ ∅ ∇ ∈ etc.
+      (set-fontset-font t '(#x2200 . #x22ff) mono-font)
+      
+      ;; Miscellaneous Symbols (U+2600-U+26FF)
+      ;; Includes: ☀ ☁ ☂ ☃ ★ ☆ ☎ ☏ ☐ ☑ ☒ ⚡ etc.
+      ;; This range has many emoji variants, so be selective
+      (set-fontset-font t '(#x2600 . #x26ff) mono-font)
+      
+      ;; Dingbats (U+2700-U+27BF) - often has emoji variants
+      ;; Includes: ✓ ✗ ✦ ✧ ✳ etc.
+      (set-fontset-font t '(#x2700 . #x27bf) mono-font)
+      
+      ;; Supplemental Arrows-A (U+27F0-U+27FF)
+      (set-fontset-font t '(#x27f0 . #x27ff) mono-font)
+      
+      ;; Supplemental Arrows-B (U+2900-U+297F)
+      (set-fontset-font t '(#x2900 . #x297f) mono-font)
+      
+      ;; Miscellaneous Symbols and Arrows (U+2B00-U+2BFF)
+      ;; Includes: ⬅ ⬆ ⬇ ⭐ ⭕ etc.
+      (set-fontset-font t '(#x2b00 . #x2bff) mono-font)
+      
+      ;; Additional specific problematic characters
+      ;; These are common technical symbols that still might slip through
+      (dolist (char '(?⏸ ?⏹ ?⏺ ?⏻ ?⏼ ?⏽  ; Media controls
+                      ?✓ ?✗ ?✦ ?✧ ?✳      ; Check marks and asterisks
+                      ?▶ ?◀ ?▲ ?▼ ?◆ ?◇    ; Triangles and diamonds
+                      ?● ?○ ?■ ?□ ?▪ ?▫    ; Circles and squares
+                      ?⚡ ?⚠ ?⚙ ?⚛         ; Warning and tech symbols
+                      ?⬅ ?➡ ?⬆ ?⬇         ; Bold arrows
+                      ?⭐ ?⭕))             ; Star and circle
+        (set-fontset-font t char mono-font)))))
+
+;; Run after Doom's font setup (this is the critical hook)
+(add-hook! 'after-setting-font-hook :append #'fix-unicode-emoji-substitution)
 
 
+;; Nerd Icons configuration
+(use-package nerd-icons
+  :config
+  ;; Configure nerd-icons for better terminal support
+  (when (not (display-graphic-p))
+    (setq nerd-icons-font-family "JetBrainsMono Nerd Font"))
+  ;; Set default scale for consistent sizing
+  (setq nerd-icons-scale-factor 1.0))
 
 ;; Claude Code
 (use-package claude-code-ide
   :bind ("C-c C-'" . claude-code-ide-menu)
   :config
   (claude-code-ide-emacs-tools-setup)
-  (setq claude-code-ide-terminal-backend 'eat))
+  (setq claude-code-ide-terminal-backend 'vterm))
 
 ;; org-roam
 ;; (setq org-roam-directory "~/org-roam")
@@ -183,3 +243,6 @@
 
 ;; keybindings
 (load! "bindings")
+
+;; Testing utilities (uncomment to test different Unicode approaches)
+;; (load! "test-unicode-fix")
