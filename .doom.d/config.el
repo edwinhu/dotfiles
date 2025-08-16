@@ -86,7 +86,7 @@
          ("C-c T" . eat-other-window))
 )
 
-;; vterm terminal configuration (separate from eat)
+;; vterm terminal configuration
 (after! vterm
   (add-hook 'vterm-mode-hook
             (lambda ()
@@ -169,7 +169,6 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 ;; Run after Doom's font setup (this is the critical hook)
 (add-hook! 'after-setting-font-hook :append #'fix-unicode-emoji-substitution)
 
-
 ;; Nerd Icons configuration
 (use-package nerd-icons
   :config
@@ -185,16 +184,6 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   :config
   (claude-code-ide-emacs-tools-setup)
   (setq claude-code-ide-terminal-backend 'vterm))
-
-;; org-roam configuration
-(setq org-roam-directory "~/Documents/Notes/org-roam/")
-(setq org-roam-db-location "~/Documents/Notes/org-roam/org-roam.db")
-(setq org-roam-dailies-directory "journals/")
-(setq org-roam-dailies-capture-templates
-      '(("d" "default" entry
-         "* %?"
-         :target (file+head "%<%Y-%m-%d>.org"
-                            "#+title: %<%Y-%m-%d>\n"))))
 
 ;; Include SAS support
 (use-package! ob-sas
