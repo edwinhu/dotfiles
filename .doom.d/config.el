@@ -183,6 +183,7 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   :bind ("C-c C-'" . claude-code-ide-menu)
   :config
   (claude-code-ide-emacs-tools-setup)
+  (setq claude-code-ide-window-width 120)
   (setq claude-code-ide-terminal-backend 'vterm))
 
 ;; Include SAS support
@@ -191,6 +192,9 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 (org-babel-do-load-languages
  'org-babel-load-languages
  '((sas . t)
+   (R . t)
+   (python . t)
+   (jupyter . t)
    ))
 (add-to-list 'org-src-lang-modes '("sas" . SAS))
 
@@ -236,6 +240,179 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 (add-hook 'sh-mode-hook
           #'(lambda()
              (local-set-key (kbd "C-<return>") 'eir-eval-in-shell)))
+
+;; File-based logging for debugging
+(defvar jupyter-debug-log-file (expand-file-name "jupyter-debug.log" "~/"))
+
+(defun log-to-file (message)
+  "Log MESSAGE to debug file with timestamp"
+  (with-temp-buffer
+    (insert (format "[%s] %s\n" 
+                    (format-time-string "%Y-%m-%d %H:%M:%S") 
+                    message))
+    (append-to-file (point-min) (point-max) jupyter-debug-log-file)))
+
+(defun clear-jupyter-log ()
+  "Clear the jupyter debug log file"
+  (interactive)
+  (when (file-exists-p jupyter-debug-log-file)
+    (delete-file jupyter-debug-log-file))
+  (log-to-file "=== Jupyter Debug Log Started ==="))
+
+;; Initialize log
+(clear-jupyter-log)
+
+;; Test without loading ZMQ at all to isolate the issue
+(log-to-file "Skipping ZMQ loading to test if that's the source of the error")
+
+;; Direnv integration for environment management
+(use-package! envrc
+  :config
+  (envrc-global-mode)
+  ;; Ensure envrc updates exec-path and PATH
+  (setq envrc-debug t)) ; Enable debug mode for troubleshooting
+
+;; Function to find jupyter in pixi environment
+(defun find-pixi-jupyter ()
+  "Find jupyter executable in current pixi environment."
+  (let* ((default-directory (locate-dominating-file default-directory ".envrc"))
+         (pixi-jupyter (when default-directory
+                        (expand-file-name ".pixi/envs/default/bin/jupyter" default-directory))))
+    (when (and pixi-jupyter (file-executable-p pixi-jupyter))
+      pixi-jupyter)))
+
+;; Function to update jupyter paths for current project
+(defun update-jupyter-paths ()
+  "Update jupyter paths for current project."
+  (when-let ((jupyter-path (find-pixi-jupyter)))
+    (setq-local jupyter-command jupyter-path
+                jupyter-executable jupyter-path
+                org-babel-jupyter-command jupyter-path)
+    (message "Updated jupyter path to: %s" jupyter-path)))
+
+;; Hook to update jupyter paths when entering a directory
+(add-hook 'find-file-hook #'update-jupyter-paths)
+
+;; Jupyter configuration  
+(use-package! jupyter
+  :defer t
+  :commands (jupyter-run-repl jupyter-connect-repl jupyter-available-kernelspecs
+             jupyter-repl-associate-buffer org-babel-execute:jupyter)
+  :init
+  ;; Skip ZMQ loading in init to test if it's causing conflicts
+  (log-to-file "Jupyter package init: Skipping ZMQ for testing")
+  ;; Add autoloads for jupyter functions
+  (autoload 'jupyter-run-repl "jupyter" "Run a Jupyter REPL" t)
+  (autoload 'jupyter-connect-repl "jupyter" "Connect to a Jupyter kernel" t)
+  (log-to-file "Jupyter package init: Autoloads added")
+  :config
+  ;; Force emacs-jupyter to use nix-provided ZMQ, don't build it
+  (setq jupyter-use-zmq nil) ; Disable ZMQ module loading entirely
+  (log-to-file "Jupyter package config: jupyter-use-zmq set to nil (using nix zmq)")
+  
+  ;; Explicitly load zmq module from nix
+  (condition-case err
+      (progn
+        (require 'zmq)
+        (log-to-file "Successfully loaded nix-provided zmq module"))
+    (error
+     (log-to-file (format "Failed to load zmq: %s" err))))
+  
+  ;; Set multiple possible variable names for jupyter executable
+  (let ((jupyter-path (or (find-pixi-jupyter)
+                         "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"
+                         "jupyter")))
+    (setq jupyter-command jupyter-path
+          jupyter-executable jupyter-path
+          org-babel-jupyter-command jupyter-path
+          python-shell-interpreter "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/python"))
+  
+  ;; Advice to ensure jupyter-run-repl uses the correct path
+  (defun jupyter-ensure-executable (orig-fun &rest args)
+    "Ensure jupyter executable is available before running jupyter commands."
+    (let ((jupyter-path (find-pixi-jupyter)))
+      (when jupyter-path
+        (setq jupyter-command jupyter-path
+              jupyter-executable jupyter-path))
+      (apply orig-fun args)))
+  
+  ;; Remove any advice functions that might cause hot loading conflicts
+  (when (fboundp 'jupyter-run-repl)
+    (advice-remove 'jupyter-run-repl #'jupyter-ensure-executable)
+    (advice-remove 'jupyter-run-repl #'debug-jupyter-run-repl)
+    (log-to-file "Removed advice from jupyter-run-repl"))
+  
+  ;; Ensure REPL buffer is displayed properly
+  (setq jupyter-repl-echo-eval-p t)
+  (setq jupyter-repl-prompt-margin-width 4)
+  
+  ;; Debug function to check REPL status
+  (defun debug-jupyter-repl ()
+    "Debug jupyter REPL status"
+    (interactive)
+    (message "Current client: %s" jupyter-current-client)
+    (message "All buffers: %s" (mapcar #'buffer-name (buffer-list)))
+    (message "Jupyter buffers: %s" (seq-filter (lambda (b) (string-match-p "jupyter" (buffer-name b))) (buffer-list))))
+  
+  ;; Add hook to ensure buffer is displayed
+  (add-hook 'jupyter-repl-mode-hook
+            (lambda ()
+              (message "REPL buffer created: %s" (buffer-name))
+              (switch-to-buffer (current-buffer))))
+  
+  ;; Alternative function to start jupyter with explicit kernel
+  (defun start-jupyter-r-repl ()
+    "Start Jupyter R REPL with explicit configuration"
+    (interactive)
+    (let ((jupyter-command (or (find-pixi-jupyter) "jupyter")))
+      (message "Using jupyter: %s" jupyter-command)
+      (jupyter-run-repl "ir" nil t)))
+  
+  ;; Simple function to show jupyter buffers
+  (defun show-jupyter-buffers ()
+    "Show all jupyter-related buffers"
+    (interactive)
+    (let ((jupyter-buffers (seq-filter (lambda (b) 
+                                       (string-match-p "jupyter\\|repl" (buffer-name b))) 
+                                     (buffer-list))))
+      (message "Jupyter buffers: %s" 
+               (mapcar #'buffer-name jupyter-buffers))))
+  
+  ;; Simple function to connect to existing kernel
+  (defun connect-to-kernel ()
+    "Connect to existing kernel"
+    (interactive)
+    (jupyter-connect-repl "/Users/vwh7mb/Library/Jupyter/runtime/kernel-529.json"))
+  
+  ;; Load jupyter org-babel support
+  (condition-case err
+      (progn
+        (require 'ob-jupyter)
+        (log-to-file "ob-jupyter loaded successfully"))
+    (error 
+     (log-to-file (format "Failed to load ob-jupyter: %s" err))))
+  
+  ;; Configure org-babel integration after jupyter is loaded
+  (with-eval-after-load 'org
+    (log-to-file "Configuring org-babel languages")
+    (org-babel-do-load-languages
+     'org-babel-load-languages
+     '((python . t)
+       (R . t)
+       (jupyter . t)))
+    (log-to-file "org-babel languages configured")
+    
+    ;; Remove any existing advice that might be causing conflicts
+    (when (fboundp 'org-babel-execute:jupyter)
+      (advice-remove 'org-babel-execute:jupyter #'jupyter-ensure-executable)
+      (log-to-file "Removed potentially conflicting advice from org-babel-execute:jupyter")))
+  
+  ) ; End use-package! jupyter
+
+;; Set default jupyter kernels
+(setq org-babel-default-header-args:jupyter '((:async . "yes")
+                                              (:session . "py") 
+                                              (:kernel . "python")))
 
 ;; keybindings
 (load! "bindings")

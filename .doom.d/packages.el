@@ -26,6 +26,14 @@
 (package! catppuccin-theme)
 (package! nerd-icons)
 
+;; Jupyter integration  
+(package! jupyter)
+;; ZMQ provided by nix (epkgs.zmq) - disable Doom's zmq package
+(package! zmq :disable t)
+
+;; Direnv integration for pixi environments
+(package! envrc)
+
 ;; To install a package directly from a particular repo, you'll need to specify
 ;; a `:recipe'. You'll find documentation on what `:recipe' accepts here:
 ;; https://github.com/raxod502/straight.el#the-recipe-format
