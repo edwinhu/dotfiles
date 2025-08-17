@@ -322,38 +322,18 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   (jupyter-debug-log 'info "✓ jupyter-use-zmq set to nil")
   
   ;; FORCE KERNEL-ONLY MODE (NO NOTEBOOK SERVER)
-  ;; Completely disable any notebook server mechanisms
+  ;; This is the key fix - prevent emacs-jupyter from trying to connect to notebook servers
   (setq jupyter-runtime-directory nil)              ; Don't look for existing notebook servers
   (setq jupyter-server-kernel-names nil)           ; Don't try to get kernels from servers
   (setq jupyter-include-other-output nil)          ; Simplified output handling
   
-  ;; Disable ALL server-related functionality
+  ;; Disable server-related variables if they exist
   (when (boundp 'jupyter-server-launch-url)
     (setq jupyter-server-launch-url nil))           ; Don't try to connect to notebook server
   (when (boundp 'jupyter-server-buffer-name)
     (setq jupyter-server-buffer-name nil))          ; Don't look for server buffers
   (when (boundp 'jupyter-server-process-buffer)
     (setq jupyter-server-process-buffer nil))       ; Don't manage server processes
-  
-  ;; Disable notebook-style connection discovery
-  (when (boundp 'jupyter-connections-file)
-    (setq jupyter-connections-file nil))            ; Don't use connections file
-  (when (boundp 'jupyter-connection-dir)  
-    (setq jupyter-connection-dir nil))              ; Don't look in connection directory
-  
-  ;; Force direct kernel process startup
-  (setq jupyter-use-kernel-cmd t)                   ; Force using kernel command directly
-  (setq jupyter-repl-kernel-cmd "jupyter")          ; Use jupyter kernel command
-  
-  ;; Prevent any browser/server launching
-  (when (boundp 'jupyter-launch-browser)
-    (setq jupyter-launch-browser nil))              ; Never launch browser
-  (when (boundp 'jupyter-notebook-startup-flags)
-    (setq jupyter-notebook-startup-flags nil))      ; No notebook flags
-  
-  ;; Override kernel startup method to use 'jupyter kernel' directly
-  (when (boundp 'jupyter-kernel-startup-method)
-    (setq jupyter-kernel-startup-method 'direct))   ; Force direct method
   
   ;; Force console mode behavior
   (setq jupyter-default-timeout 10)                 ; Reasonable timeout for direct kernel communication
@@ -446,112 +426,25 @@ that should be monospace but are often hijacked by Apple Color Emoji."
     (when (boundp 'jupyter-server-launch-url)
       (jupyter-debug-log 'info "  jupyter-server-launch-url: %s" jupyter-server-launch-url)))
   
-  ;; Override jupyter kernel startup to force direct kernel command
-  (defun jupyter-kernel-start-override (orig-fun &rest args)
-    "Override to force using 'jupyter kernel' command instead of notebook server."
-    (jupyter-debug-log 'info "Overriding kernel startup to use direct 'jupyter kernel' command")
-    (let* ((kernel-name (car args))
-           (kernel-spec (jupyter-get-kernelspec kernel-name))
-           (jupyter-cmd (or (find-pixi-jupyter) 
-                           "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"
-                           "jupyter"))
-           ;; Force kernel-only command
-           (kernel-cmd (list jupyter-cmd "kernel" "--kernel" kernel-name)))
-      
-      (jupyter-debug-log 'info "Using direct kernel command: %s" (string-join kernel-cmd " "))
-      
-      ;; Override the kernelspec argv to use direct kernel command
-      (when kernel-spec
-        (plist-put kernel-spec :argv kernel-cmd))
-      
-      ;; Call original function with modified spec
-      (apply orig-fun args)))
-  
-  ;; Apply the override to kernel startup functions
-  (advice-add 'jupyter-start-kernel :around #'jupyter-kernel-start-override)
-  
-  ;; Override jupyter-run-repl to prevent notebook server attempts
-  (defun jupyter-run-repl-override (orig-fun &rest args)
-    "Override jupyter-run-repl to force direct kernel startup."
-    (jupyter-debug-log 'info "Overriding jupyter-run-repl to prevent notebook server startup")
-    (let* ((kernel-name (car args))
-           ;; Force all server-related variables to nil during this call
-           (jupyter-runtime-directory nil)
-           (jupyter-server-kernel-names nil)
-           (jupyter-include-other-output nil)
-           (jupyter-use-zmq nil))
-      
-      (jupyter-debug-log 'info "Forcing direct kernel startup for REPL: %s" kernel-name)
-      
-      ;; Try the force kernel startup function instead
-      (condition-case err
-          (jupyter-force-kernel-startup kernel-name)
-        (error
-         (jupyter-debug-log 'warn "Force startup failed, trying original function: %s" err)
-         ;; Fallback to original function with server variables disabled
-         (apply orig-fun args)))))
-  
-  ;; Apply the REPL override
-  (advice-add 'jupyter-run-repl :around #'jupyter-run-repl-override)
-  
   ;; Enhanced force kernel-only startup function
   (defun jupyter-force-kernel-startup (kernel-name)
-    "Force direct kernel startup using 'jupyter kernel' command."
+    "Force direct kernel startup, completely bypassing notebook server attempts."
     (interactive (list (jupyter-completing-read-kernelspec)))
     (jupyter-debug-log 'info "=== Force-starting kernel: %s ===" kernel-name)
     
-    ;; Use direct jupyter kernel command
-    (let* ((jupyter-cmd (or (find-pixi-jupyter) 
-                           "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"
-                           "jupyter"))
-           (kernel-args (list jupyter-cmd "kernel" "--kernel" kernel-name))
-           (connection-file (make-temp-file "jupyter-" nil ".json")))
+    ;; Comprehensive server-related variable disabling
+    (let ((jupyter-runtime-directory nil)
+          (jupyter-server-launch-url nil)
+          (jupyter-server-buffer-name nil)
+          (jupyter-server-process-buffer nil)
+          (jupyter-server-kernel-names nil)
+          (jupyter-include-other-output nil)
+          (jupyter-use-zmq nil))                    ; Ensure ZMQ is disabled
       
-      (jupyter-debug-log 'info "Starting kernel with command: %s" (string-join kernel-args " "))
-      (jupyter-debug-log 'info "Connection file: %s" connection-file)
+      (jupyter-debug-log 'info "All server-related variables disabled for this startup")
       
-      ;; Start the kernel process directly
+      ;; Start kernel directly using jupyter-start-kernel
       (condition-case err
-          (let* ((process-name (format "jupyter-kernel-%s" kernel-name))
-                 (buffer-name (format "*%s*" process-name))
-                 (kernel-process (apply #'start-process 
-                                       process-name buffer-name 
-                                       (car kernel-args) 
-                                       (append (cdr kernel-args) 
-                                              (list "--connection-file" connection-file)))))
-            
-            (if kernel-process
-                (progn
-                  (jupyter-debug-log 'info "✓ Kernel process started: %s" kernel-process)
-                  (message "Kernel %s started successfully using direct kernel command" kernel-name)
-                  
-                  ;; Wait for connection file to be created
-                  (while (not (file-exists-p connection-file))
-                    (sleep-for 0.1))
-                  
-                  ;; Connect to the kernel using the connection file
-                  (jupyter-debug-log 'info "Connecting to kernel using connection file: %s" connection-file)
-                  (jupyter-connect-repl connection-file))
-              (jupyter-debug-log 'error "✗ Failed to start kernel process for %s" kernel-name)))
-        (error 
-         (jupyter-debug-log 'error "✗ Failed to start kernel %s: %s" kernel-name err)
-         (message "Kernel startup failed: %s" err)))))
-  
-  ;; Apply error handling to org-babel only (jupyter-run-repl already has override)
-  (advice-add 'org-babel-execute:jupyter :around #'jupyter-strategy-a-error-handler)
-  
-  (jupyter-debug-log 'info "✓ Strategy A configuration complete")
-  
-  ) ; End Strategy A jupyter configuration
-  ) ; End use-package! jupyter
-
-;; Set default jupyter kernels
-(setq org-babel-default-header-args:jupyter '((:async . "yes")
-                                              (:session . "py") 
-                                              (:kernel . "python")))
-
-;; keybindings
-(load! "bindings")
-
-;; Testing utilities (uncomment to test different Unicode approaches)
-;; (load! "test-unicode-fix")
+          (progn
+            (jupyter-debug-log 'info "Attempting direct kernel startup...")
+            (let ((kernel (jupyter-start-kernel kernel-name)))
