@@ -479,6 +479,36 @@ FORMAT-STRING and ARGS: format string and arguments for logging."
             (jupyter-debug-log 'info "Kernel: %s" (jupyter-kernelspec-name spec))))
       (error (jupyter-debug-log 'error "Jupyter kernel discovery failed: %s" err)))))
 
+(defun jupyter-debug-r-kernel ()
+  "Specific debugging for R kernel connection issues."
+  (interactive)
+  (jupyter-debug-log 'info "=== R Kernel Specific Debug ===")
+  
+  ;; Check R kernel availability
+  (condition-case err
+      (let ((specs (jupyter-available-kernelspecs)))
+        (let ((r-spec (cl-find "ir" specs :key #'jupyter-kernelspec-name :test #'string=)))
+          (if r-spec
+              (progn
+                (jupyter-debug-log 'info "✓ R kernel (ir) found in kernelspecs")
+                (jupyter-debug-log 'debug "R kernelspec: %s" r-spec))
+            (jupyter-debug-log 'error "✗ R kernel (ir) not found in kernelspecs"))))
+    (error (jupyter-debug-log 'error "Failed to check R kernel: %s" err)))
+  
+  ;; Check if R is available
+  (let ((r-executable (executable-find "R")))
+    (if r-executable
+        (jupyter-debug-log 'info "✓ R executable found: %s" r-executable)
+      (jupyter-debug-log 'error "✗ R executable not found in PATH")))
+  
+  ;; Check IRkernel installation
+  (condition-case err
+      (let ((output (shell-command-to-string "R --slave -e 'packageVersion(\"IRkernel\")'")))
+        (if (string-match-p "Error\\|not found" output)
+            (jupyter-debug-log 'error "✗ IRkernel package not installed in R")
+          (jupyter-debug-log 'info "✓ IRkernel package available: %s" (string-trim output))))
+    (error (jupyter-debug-log 'error "Failed to check IRkernel: %s" err))))
+
 ;; STRATEGY A: PURE PYTHON COMMUNICATION (NO ZMQ)
 ;; Attempt to use jupyter with websocket/HTTP communication only
 
@@ -498,6 +528,26 @@ FORMAT-STRING and ARGS: format string and arguments for logging."
   ;; CRITICAL: Disable all ZMQ usage
   (setq jupyter-use-zmq nil)
   (jupyter-debug-log 'info "✓ jupyter-use-zmq set to nil")
+  
+  ;; FORCE KERNEL-ONLY MODE (NO NOTEBOOK SERVER)
+  ;; This is the key fix - prevent emacs-jupyter from trying to connect to notebook servers
+  (setq jupyter-runtime-directory nil)              ; Don't look for existing notebook servers
+  (setq jupyter-server-kernel-names nil)           ; Don't try to get kernels from servers
+  (setq jupyter-include-other-output nil)          ; Simplified output handling
+  
+  ;; Disable server-related variables if they exist
+  (when (boundp 'jupyter-server-launch-url)
+    (setq jupyter-server-launch-url nil))           ; Don't try to connect to notebook server
+  (when (boundp 'jupyter-server-buffer-name)
+    (setq jupyter-server-buffer-name nil))          ; Don't look for server buffers
+  (when (boundp 'jupyter-server-process-buffer)
+    (setq jupyter-server-process-buffer nil))       ; Don't manage server processes
+  
+  ;; Force console mode behavior
+  (setq jupyter-default-timeout 10)                 ; Reasonable timeout for direct kernel communication
+  (setq jupyter-long-timeout 30)                    ; Longer timeout for startup
+  
+  (jupyter-debug-log 'info "✓ Forced kernel-only mode (disabled all notebook server behavior)")
   
   ;; Ensure we never try to load ZMQ
   (when (featurep 'zmq)
@@ -544,9 +594,10 @@ FORMAT-STRING and ARGS: format string and arguments for logging."
        (jupyter . t)))
     (jupyter-debug-log 'info "✓ org-babel languages configured"))
   
-  ;; Add error catching advice
+  ;; Add error catching advice with detailed debugging
   (defun jupyter-strategy-a-error-handler (orig-fun &rest args)
     "Catch and log errors in Strategy A configuration."
+    (jupyter-debug-log 'debug "Calling %s with args: %s" orig-fun args)
     (condition-case err
         (apply orig-fun args)
       (error
@@ -554,7 +605,71 @@ FORMAT-STRING and ARGS: format string and arguments for logging."
          (jupyter-debug-log 'error "Strategy A error in %s: %s" orig-fun error-msg)
          (when (string-match-p "zmq\\|ZMQ" error-msg)
            (jupyter-debug-log 'error "ZMQ error detected despite jupyter-use-zmq=nil"))
-         (signal (car err) (cdr err))))))
+         (when (string-match-p "Connection refused\\|localhost.*[0-9]+" error-msg)
+           (jupyter-debug-log 'error "Network connection error - may be trying to connect to notebook server instead of starting kernel"))
+         (signal (car err) (cdr err)))))
+  
+  ;; Add specific debugging for jupyter-run-repl
+  (defun jupyter-debug-repl-startup (kernel-name)
+    "Debug function to analyze jupyter-run-repl behavior."
+    (jupyter-debug-log 'info "=== Debugging REPL startup for %s ===" kernel-name)
+    
+    ;; Check available kernelspecs
+    (let ((specs (jupyter-available-kernelspecs)))
+      (jupyter-debug-log 'info "Available kernelspecs: %s" 
+                        (mapcar #'jupyter-kernelspec-name specs))
+      
+      ;; Find the specific kernel
+      (let ((spec (cl-find kernel-name specs :key #'jupyter-kernelspec-name :test #'string=)))
+        (if spec
+            (progn
+              (jupyter-debug-log 'info "Found kernelspec for %s" kernel-name)
+              (jupyter-debug-log 'debug "Kernelspec details: %s" spec))
+          (jupyter-debug-log 'error "No kernelspec found for %s" kernel-name))))
+    
+    ;; Check jupyter configuration
+    (jupyter-debug-log 'info "Current jupyter configuration:")
+    (jupyter-debug-log 'info "  jupyter-command: %s" jupyter-command)
+    (jupyter-debug-log 'info "  jupyter-use-zmq: %s" jupyter-use-zmq)
+    (when (boundp 'jupyter-server-launch-url)
+      (jupyter-debug-log 'info "  jupyter-server-launch-url: %s" jupyter-server-launch-url)))
+  
+  ;; Enhanced force kernel-only startup function
+  (defun jupyter-force-kernel-startup (kernel-name)
+    "Force direct kernel startup, completely bypassing notebook server attempts."
+    (interactive (list (jupyter-completing-read-kernelspec)))
+    (jupyter-debug-log 'info "=== Force-starting kernel: %s ===" kernel-name)
+    
+    ;; Comprehensive server-related variable disabling
+    (let ((jupyter-runtime-directory nil)
+          (jupyter-server-launch-url nil)
+          (jupyter-server-buffer-name nil)
+          (jupyter-server-process-buffer nil)
+          (jupyter-server-kernel-names nil)
+          (jupyter-include-other-output nil)
+          (jupyter-use-zmq nil))                    ; Ensure ZMQ is disabled
+      
+      (jupyter-debug-log 'info "All server-related variables disabled for this startup")
+      
+      ;; Start kernel directly using jupyter-start-kernel
+      (condition-case err
+          (progn
+            (jupyter-debug-log 'info "Attempting direct kernel startup...")
+            (let ((kernel (jupyter-start-kernel kernel-name)))
+              (if kernel
+                  (progn
+                    (jupyter-debug-log 'info "✓ Kernel %s started successfully" kernel-name)
+                    (jupyter-debug-log 'info "Kernel process: %s" (jupyter-kernel-process kernel))
+                    
+                    ;; Associate with REPL buffer
+                    (let ((repl-buffer (jupyter-repl-associate-buffer kernel)))
+                      (jupyter-debug-log 'info "✓ REPL buffer created: %s" (buffer-name repl-buffer))
+                      (pop-to-buffer repl-buffer)
+                      (message "R REPL ready! Kernel started as direct process (not server connection)")))
+                (jupyter-debug-log 'error "✗ jupyter-start-kernel returned nil for %s" kernel-name))))
+        (error 
+         (jupyter-debug-log 'error "✗ Failed to start kernel %s: %s" kernel-name err)
+         (message "Kernel startup failed - check *jupyter-debug* buffer")))))
   
   ;; Apply error handling to key functions
   (advice-add 'jupyter-run-repl :around #'jupyter-strategy-a-error-handler)
