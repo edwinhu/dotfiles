@@ -204,8 +204,7 @@ that should be monospace but are often hijacked by Apple Color Emoji."
  'org-babel-load-languages
  '((sas . t)
    (R . t)
-   (stata . t)
-   ))
+   (stata . t)))
 
 ;; Use advice to ensure our functions are always called
 (defun +jupyter-console-python-advice (body params)

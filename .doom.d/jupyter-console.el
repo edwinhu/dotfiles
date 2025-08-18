@@ -266,11 +266,296 @@ Optionally associate with FILE."
     (jupyter-console-log 'info "Stata execution completed: %s" result)
     result))
 
+;;; Window management
+
+(defvar jupyter-console--org-src-window-config nil
+  "Window configuration saved when first showing jupyter console in org-src mode.")
+
+(defun jupyter-console-display-buffer (buffer)
+  "Display jupyter console BUFFER in a side window."
+  ;; Save window config in org-src mode before first split
+  (when (and (bound-and-true-p org-src-mode)
+             (not jupyter-console--org-src-window-config))
+    (setq jupyter-console--org-src-window-config (current-window-configuration)))
+  (display-buffer buffer
+                  '((display-buffer-reuse-window
+                     display-buffer-in-side-window)
+                    (side . right)
+                    (window-width . 0.5)
+                    (inhibit-same-window . t))))
+
+;;; Evaluation functions with stepping
+
+(defun jupyter-console-get-function-bounds ()
+  "Get the bounds of the current function.
+Returns a cons cell (START . END) or nil if not in a function."
+  ;; Only try to detect functions in modes that have proper function detection
+  (when (or (derived-mode-p 'python-mode 'python-ts-mode)
+            (derived-mode-p 'ess-r-mode 'ess-mode))
+    (condition-case nil
+        (save-excursion
+          (let ((orig-point (point))
+                (start (progn (beginning-of-defun) (point)))
+                (end (progn (end-of-defun) (point))))
+            ;; Make sure we found a real function and we're inside it
+            (when (and (> end start)
+                       (>= orig-point start)
+                       (<= orig-point end)
+                       ;; Ensure it's actually a function (has reasonable size)
+                       (> (- end start) 10))
+              (cons start end))))
+      (error nil))))
+
+(defun jupyter-console-get-paragraph-bounds ()
+  "Get the bounds of the current paragraph.
+Returns a cons cell (START . END)."
+  (save-excursion
+    ;; In org-src buffers, just use the whole buffer if it's small
+    (if (and (bound-and-true-p org-src-mode)
+             (< (buffer-size) 1000))  ; Small buffer, likely single code block
+        (cons (point-min) (point-max))
+      ;; Otherwise use normal paragraph detection
+      (let ((start (progn (backward-paragraph) 
+                         (skip-chars-forward " \t\n")
+                         (point)))
+            (end (progn (forward-paragraph)
+                       (skip-chars-backward " \t\n")
+                       (point))))
+        (cons start end)))))
+
+(defun jupyter-console-send-region (beg end &optional kernel file show-buffer)
+  "Send region from BEG to END to jupyter console.
+KERNEL and FILE are used to identify the console buffer.
+If SHOW-BUFFER is non-nil, display the console buffer."
+  (let* ((code (buffer-substring-no-properties beg end))
+         (trimmed-code (string-trim code))
+         (kernel (or kernel (jupyter-console-detect-kernel)))
+         (file (or file (buffer-file-name)))
+         (buffer (jupyter-console-get-or-create kernel file)))
+    (jupyter-console-log 'debug "Sending region [%d-%d] to %s kernel: '%s'" beg end kernel trimmed-code)
+    ;; Don't send empty code
+    (when (and trimmed-code (not (string-empty-p trimmed-code)))
+      (when show-buffer
+        (jupyter-console-display-buffer buffer))
+      (jupyter-console-send-string buffer trimmed-code))
+    ;; Return result even if empty to avoid errors
+    trimmed-code))
+
+(defun jupyter-console-detect-kernel ()
+  "Detect the appropriate kernel based on the current major mode."
+  (cond
+   ((derived-mode-p 'python-mode 'python-ts-mode) "python3")
+   ((derived-mode-p 'ess-r-mode 'ess-mode) "ir")
+   ((derived-mode-p 'stata-mode) "stata")
+   ;; For org-src-mode, check the language
+   ((and (bound-and-true-p org-src-mode)
+         (boundp 'org-src--babel-type))
+    (pcase org-src--babel-type
+      ((or "python" "jupyter-python") "python3")
+      ((or "R" "jupyter-R") "ir")
+      ((or "stata" "jupyter-stata") "stata")
+      (_ (error "Unknown language: %s" org-src--babel-type))))
+   (t (error "Cannot detect kernel for mode: %s" major-mode))))
+
+(defun jupyter-console-next-code-line ()
+  "Move to the next line containing code (skip comments and blank lines)."
+  (forward-line 1)
+  (while (and (not (eobp))
+              (or (looking-at "^[[:space:]]*$")  ; blank line
+                  (looking-at "^[[:space:]]*#")   ; Python/R comment
+                  (looking-at "^[[:space:]]*\\*")  ; Stata comment
+                  (looking-at "^[[:space:]]*//")   ; C-style comment
+                  ))
+    (forward-line 1))
+  (beginning-of-line))
+
+(defun jupyter-console-eval-region-or-function-or-paragraph-and-step ()
+  "Send region, function, or paragraph to jupyter console and step.
+If region is active, send region. Otherwise try function, then paragraph.
+After evaluation, step to the next code line."
+  (interactive)
+  (let ((kernel (jupyter-console-detect-kernel))
+        (file (buffer-file-name))
+        (stepped nil))
+    (cond
+     ;; Region is active
+     ((use-region-p)
+      (jupyter-console-send-region (region-beginning) (region-end) kernel file t)
+      (goto-char (region-end))
+      (jupyter-console-next-code-line))
+     
+     ;; Try function bounds
+     ((jupyter-console-get-function-bounds)
+      (let ((bounds (jupyter-console-get-function-bounds)))
+        (jupyter-console-send-region (car bounds) (cdr bounds) kernel file t)
+        (goto-char (cdr bounds))
+        (jupyter-console-next-code-line)))
+     
+     ;; Fall back to paragraph
+     (t
+      (let ((bounds (jupyter-console-get-paragraph-bounds)))
+        (jupyter-console-send-region (car bounds) (cdr bounds) kernel file t)
+        (goto-char (cdr bounds))
+        (jupyter-console-next-code-line))))))
+
+(defun jupyter-console-eval-line-and-step ()
+  "Send current line to jupyter console and step to next line."
+  (interactive)
+  (let ((kernel (jupyter-console-detect-kernel))
+        (file (buffer-file-name)))
+    (jupyter-console-send-region
+     (line-beginning-position)
+     (line-end-position)
+     kernel file t)
+    (jupyter-console-next-code-line)))
+
+(defun jupyter-console-eval-region-or-line-and-step ()
+  "Send region if active, otherwise current line, then step."
+  (interactive)
+  (if (use-region-p)
+      (let ((kernel (jupyter-console-detect-kernel))
+            (file (buffer-file-name)))
+        (jupyter-console-send-region (region-beginning) (region-end) kernel file t)
+        (goto-char (region-end))
+        (jupyter-console-next-code-line))
+    (jupyter-console-eval-line-and-step)))
+
+;;; Language-specific wrapper functions
+
+(defun jupyter-console-python-eval-and-step ()
+  "Python-specific eval and step function for C-RET."
+  (interactive)
+  (jupyter-console-eval-region-or-function-or-paragraph-and-step))
+
+(defun jupyter-console-r-eval-and-step ()
+  "R-specific eval and step function for C-RET."
+  (interactive)
+  (jupyter-console-eval-region-or-function-or-paragraph-and-step))
+
+(defun jupyter-console-stata-eval-and-step ()
+  "Stata-specific eval and step function for C-RET."
+  (interactive)
+  (jupyter-console-eval-region-or-function-or-paragraph-and-step))
+
+;;; Keybinding setup functions
+
+(defun jupyter-console-setup-python-keybindings ()
+  "Set up C-RET keybinding for Python mode."
+  (define-key python-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+  (when (boundp 'python-ts-mode-map)
+    (define-key python-ts-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step))
+  ;; Evil mode support - bind in all states to avoid conflicts
+  (with-eval-after-load 'evil
+    (evil-define-key 'normal python-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+    (evil-define-key 'insert python-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+    (evil-define-key 'visual python-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+    (when (boundp 'python-ts-mode-map)
+      (evil-define-key 'normal python-ts-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+      (evil-define-key 'insert python-ts-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+      (evil-define-key 'visual python-ts-mode-map (kbd "C-<return>") #'jupyter-console-python-eval-and-step))))
+
+(defun jupyter-console-setup-r-keybindings ()
+  "Set up C-RET keybinding for R/ESS mode."
+  (when (boundp 'ess-r-mode-map)
+    (define-key ess-r-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+    ;; Evil mode support
+    (with-eval-after-load 'evil
+      (evil-define-key 'normal ess-r-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+      (evil-define-key 'insert ess-r-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+      (evil-define-key 'visual ess-r-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)))
+  (when (boundp 'ess-mode-map)
+    (define-key ess-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+    ;; Evil mode support
+    (with-eval-after-load 'evil
+      (evil-define-key 'normal ess-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+      (evil-define-key 'insert ess-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+      (evil-define-key 'visual ess-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step))))
+
+(defun jupyter-console-setup-stata-keybindings ()
+  "Set up C-RET keybinding for Stata mode."
+  ;; Stata mode may not have an explicit keymap, so we use a hook
+  (add-hook 'stata-mode-hook
+            (lambda ()
+              (local-set-key (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+              ;; Evil mode support
+              (with-eval-after-load 'evil
+                (when (fboundp 'evil-local-set-key)
+                  (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+                  (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+                  (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-stata-eval-and-step))))))
+
+(defun jupyter-console-org-src-restore-windows ()
+  "Restore window configuration when exiting org-src mode."
+  (when jupyter-console--org-src-window-config
+    (set-window-configuration jupyter-console--org-src-window-config)
+    (setq jupyter-console--org-src-window-config nil)))
+
+(defun jupyter-console-setup-org-src-keybindings ()
+  "Set up keybindings when in org-src-mode."
+  (when (and (bound-and-true-p org-src-mode)
+             (boundp 'org-src--babel-type))
+    ;; Set up window restoration on exit
+    (add-hook 'org-src-mode-hook
+              (lambda ()
+                (add-hook 'kill-buffer-hook #'jupyter-console-org-src-restore-windows nil t))
+              nil t)
+    (let ((lang org-src--babel-type))
+      (cond
+       ((member lang '("python" "jupyter-python"))
+        (local-set-key (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+        ;; Evil mode support in org-src buffers
+        (with-eval-after-load 'evil
+          (when (fboundp 'evil-local-set-key)
+            (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+            (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+            (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-python-eval-and-step))))
+       ((member lang '("R" "jupyter-R"))
+        (local-set-key (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+        ;; Evil mode support in org-src buffers
+        (with-eval-after-load 'evil
+          (when (fboundp 'evil-local-set-key)
+            (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+            (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+            (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-r-eval-and-step))))
+       ((member lang '("stata" "jupyter-stata"))
+        (local-set-key (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+        ;; Evil mode support in org-src buffers
+        (with-eval-after-load 'evil
+          (when (fboundp 'evil-local-set-key)
+            (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+            (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+            (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-stata-eval-and-step))))))))
+
+;;; Mode hooks setup
+
+(defun jupyter-console-setup-keybindings ()
+  "Set up all keybindings for jupyter-console."
+  ;; Python mode
+  (with-eval-after-load 'python
+    (jupyter-console-setup-python-keybindings))
+  
+  ;; ESS/R mode
+  (with-eval-after-load 'ess-r-mode
+    (jupyter-console-setup-r-keybindings))
+  
+  ;; Stata mode - load immediately since it's a simple mode
+  (jupyter-console-setup-stata-keybindings)
+  ;; Also ensure it's loaded if stata-mode is loaded later
+  (with-eval-after-load 'ob-stata
+    (jupyter-console-setup-stata-keybindings))
+  
+  ;; Org-src-mode hook
+  (add-hook 'org-src-mode-hook #'jupyter-console-setup-org-src-keybindings))
+
 ;; Initialize log
 (jupyter-console-clear-log)
 (jupyter-console-log 'info "Jupyter console module loaded")
 (jupyter-console-log 'info "Emacs version: %s" emacs-version)
 (jupyter-console-log 'info "Running in batch mode: %s" (if noninteractive "yes" "no"))
+
+;; Set up keybindings
+(jupyter-console-setup-keybindings)
+(jupyter-console-log 'info "Keybindings configured for C-RET in Python, R, and Stata modes")
 
 (provide 'jupyter-console)
 ;;; jupyter-console.el ends here
