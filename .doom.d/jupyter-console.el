@@ -78,7 +78,7 @@ TIMEOUT defaults to 3 seconds."
                     (if output-received
                         ;; Got output, wait a little for prompt or more output
                         (and (< (time-to-seconds (time-subtract (current-time) start-time)) 
-                                (min timeout 1.0))  ; Wait up to 1 second after first output
+                                timeout)  ; Wait full timeout for R/Stata
                              (not (looking-back jupyter-console-prompt-regexp 
                                                (max (point-min) (- (point) 100)))))
                       ;; No output yet, keep waiting
@@ -143,8 +143,14 @@ Optionally associate it with FILE."
 (defun jupyter-console-get-or-create (kernel &optional file)
   "Get existing or create new jupyter console for KERNEL.
 Optionally associate with FILE."
-  (let* ((key (cons file kernel))
+  ;; In org-src-mode, use the original org file
+  (let* ((actual-file (or file
+                          (and (boundp 'org-src-source-file-name)
+                               org-src-source-file-name)
+                          (buffer-file-name)))
+         (key (cons actual-file kernel))
          (existing-buffer (gethash key jupyter-console-buffers)))
+    (jupyter-console-log 'debug "Getting console for kernel=%s file=%s" kernel actual-file)
     (if (and existing-buffer 
              (buffer-live-p existing-buffer)
              (comint-check-proc existing-buffer))
@@ -153,7 +159,7 @@ Optionally associate with FILE."
                               (buffer-name existing-buffer))
           existing-buffer)
       ;; Create new buffer and store it
-      (let ((new-buffer (jupyter-console-start-process kernel file)))
+      (let ((new-buffer (jupyter-console-start-process kernel actual-file)))
         (puthash key new-buffer jupyter-console-buffers)
         new-buffer))))
 
@@ -189,8 +195,9 @@ Optionally associate with FILE."
         ;; Send the code
         (comint-send-string proc (concat code "\n"))
         
-        ;; Wait for output - simple commands are fast but some kernels need more time
-        (jupyter-console-wait-for-prompt buffer 3)
+        ;; Wait for output - R and Stata may need more time
+        (let ((wait-time (if (string-match-p "\\(ir\\|stata\\)" buffer-key) 5 3)))
+          (jupyter-console-wait-for-prompt buffer wait-time))
         
         ;; Get everything between our mark and the new prompt
         (goto-char (point-max))
@@ -204,6 +211,7 @@ Optionally associate with FILE."
 
 (defun jupyter-console-extract-output (raw-output code)
   "Extract clean output from RAW-OUTPUT, removing CODE echo and prompts."
+  (jupyter-console-log 'debug "Extracting output from:\n%s" raw-output)
   (let ((output raw-output))
     ;; Remove the echoed command
     (setq output (replace-regexp-in-string 
@@ -215,28 +223,33 @@ Optionally associate with FILE."
     ;; Remove In[n]: patterns
     (setq output (replace-regexp-in-string "^In \\[[0-9]+\\]: *" "" output))
     
-    ;; Extract output based on patterns
-    (cond
-     ;; Python/IPython style output: Out[n]: value
-     ((string-match "Out\\[[0-9]+\\]: \\(.*\\)" output)
-      (match-string 1 output))
-     
-     ;; R style output: [1] "value"
-     ((string-match "\\[1\\] \"\\(.*\\)\"" output)
-      (match-string 1 output))
-     
-     ;; R style output without quotes: [1] value
-     ((string-match "\\[1\\] \\(.*\\)" output)
-      (match-string 1 output))
-     
-     ;; Plain output (for print statements)
-     ((string-match "\\([^\n]+\\)" output)
-      (let ((result (match-string 1 output)))
-        ;; Clean up any remaining whitespace
-        (string-trim result)))
-     
-     ;; Empty output
-     (t nil))))
+    ;; Trim whitespace
+    (setq output (string-trim output))
+    
+    (jupyter-console-log 'debug "After cleaning: '%s'" output)
+    
+    ;; If we have any output after cleaning, return it
+    (if (and output (not (string-empty-p output)))
+        ;; Extract output based on patterns
+        (cond
+         ;; Python/IPython style output: Out[n]: value
+         ((string-match "Out\\[[0-9]+\\]: \\(.*\\)" output)
+          (match-string 1 output))
+         
+         ;; R style output: [1] "value"
+         ((string-match "\\[1\\] \"\\(.*\\)\"" output)
+          (match-string 1 output))
+         
+         ;; R style output without quotes: [1] value
+         ((string-match "\\[1\\] \\(.*\\)" output)
+          (match-string 1 output))
+         
+         ;; Plain output - just return as is
+         (t output))
+      ;; Return nil for empty output, but log it
+      (progn
+        (jupyter-console-log 'warn "No output extracted from execution")
+        nil))))
 
 ;; Define org-babel execution functions directly
 (defun org-babel-execute:python (body params)
@@ -330,7 +343,11 @@ If SHOW-BUFFER is non-nil, display the console buffer."
   (let* ((code (buffer-substring-no-properties beg end))
          (trimmed-code (string-trim code))
          (kernel (or kernel (jupyter-console-detect-kernel)))
-         (file (or file (buffer-file-name)))
+         ;; Use org-src-source-file-name when in org-src-mode
+         (file (or file 
+                   (and (boundp 'org-src-source-file-name)
+                        org-src-source-file-name)
+                   (buffer-file-name)))
          (buffer (jupyter-console-get-or-create kernel file)))
     (jupyter-console-log 'debug "Sending region [%d-%d] to %s kernel: '%s'" beg end kernel trimmed-code)
     ;; Don't send empty code
@@ -375,7 +392,9 @@ If region is active, send region. Otherwise try function, then paragraph.
 After evaluation, step to the next code line."
   (interactive)
   (let ((kernel (jupyter-console-detect-kernel))
-        (file (buffer-file-name))
+        (file (or (and (boundp 'org-src-source-file-name)
+                       org-src-source-file-name)
+                  (buffer-file-name)))
         (stepped nil))
     (cond
      ;; Region is active
@@ -402,7 +421,9 @@ After evaluation, step to the next code line."
   "Send current line to jupyter console and step to next line."
   (interactive)
   (let ((kernel (jupyter-console-detect-kernel))
-        (file (buffer-file-name)))
+        (file (or (and (boundp 'org-src-source-file-name)
+                       org-src-source-file-name)
+                  (buffer-file-name))))
     (jupyter-console-send-region
      (line-beginning-position)
      (line-end-position)
@@ -414,7 +435,9 @@ After evaluation, step to the next code line."
   (interactive)
   (if (use-region-p)
       (let ((kernel (jupyter-console-detect-kernel))
-            (file (buffer-file-name)))
+            (file (or (and (boundp 'org-src-source-file-name)
+                           org-src-source-file-name)
+                      (buffer-file-name))))
         (jupyter-console-send-region (region-beginning) (region-end) kernel file t)
         (goto-char (region-end))
         (jupyter-console-next-code-line))
