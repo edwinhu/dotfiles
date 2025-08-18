@@ -174,17 +174,8 @@ Optionally associate with FILE."
       (unless proc
         (error "No process in buffer %s" (buffer-name buffer)))
       
-      ;; Check if this is the first command to this buffer
-      (let ((is-first (not (gethash buffer-key jupyter-console-first-run))))
-        (when is-first
-          (puthash buffer-key t jupyter-console-first-run)
-          ;; For Stata, send a dummy command first to clear banner
-          (when (string-match "stata" buffer-key)
-            (jupyter-console-log 'debug "Clearing Stata banner with dummy command")
-            (goto-char (point-max))
-            (comint-send-string proc "di \"\"\n")
-            (sit-for 1)
-            (goto-char (point-max))))
+      ;; Mark that we've used this buffer (but don't send dummy commands)
+      (puthash buffer-key t jupyter-console-first-run)
       
       ;; Move to end of buffer
       (goto-char (point-max))
