@@ -201,14 +201,23 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 ;; Include SAS support
 (use-package! ob-sas
   :load-path "~/.doom.d/")
+
+;; Include Stata support
+(use-package! ob-stata
+  :load-path "~/.doom.d/")
 (org-babel-do-load-languages
  'org-babel-load-languages
  '((sas . t)
    (R . t)
    (python . t)
+   (stata . t)
    (jupyter . t)
    ))
+;; Language mode mappings for syntax highlighting in org source blocks
 (add-to-list 'org-src-lang-modes '("sas" . SAS))
+(add-to-list 'org-src-lang-modes '("jupyter-python" . python))
+(add-to-list 'org-src-lang-modes '("jupyter-R" . ess-r))
+(add-to-list 'org-src-lang-modes '("jupyter-stata" . stata))
 
 ;; Edit in same window
 ;; Doom now treats these buffers as pop-ups
@@ -415,6 +424,7 @@ that should be monospace but are often hijacked by Apple Color Emoji."
      'org-babel-load-languages
      '((python . t)
        (R . t)
+       (stata . t)
        (jupyter . t)))
     (jupyter-debug-log 'info "✓ org-babel languages configured"))
   
