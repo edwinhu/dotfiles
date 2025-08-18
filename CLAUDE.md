@@ -72,3 +72,54 @@ dotfiles/
 ### Marimo Notebooks
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
+
+## Jupyter Integration (CRITICAL)
+
+### ZMQ Elimination Strategy
+Jupyter has been configured to work **WITHOUT ZMQ** to avoid persistent binary module conflicts. This is a hard requirement.
+
+**NEVER re-enable ZMQ** - it causes binary compatibility issues between nix and system packages.
+
+### Current Configuration
+1. **Nix packages**: ZMQ removed from `~/nix/modules/darwin/packages.nix`
+   - Line should be: `((emacsPackagesFor emacs-macport).emacsWithPackages (epkgs: [ epkgs.vterm ]))`
+   - NO `epkgs.zmq` in the list
+
+2. **Doom packages**: ZMQ disabled in `.doom.d/packages.el`
+   - `(package! zmq :disable t)` must remain
+
+3. **Config settings**: ZMQ forced off in `.doom.d/config.el`
+   - `jupyter-use-zmq nil` in the jupyter configuration
+   - Direct kernel startup using `jupyter kernel` command
+
+### Verification Commands
+**Quick check**: Run the verification script:
+```bash
+~/dotfiles/scripts/check-zmq-status.sh
+```
+
+**Manual checks** (if needed):
+```bash
+# Should return nil (not found)
+emacs --batch --eval "(message \"ZMQ: %s\" (locate-library \"zmq\"))"
+
+# Should show no ZMQ build directories
+ls ~/.emacs.d/.local/straight/build*/zmq* 2>/dev/null
+
+# Should show no ZMQ compiled files
+find ~/.emacs.d/.local -name "*zmq*.elc" 2>/dev/null
+```
+
+### If ZMQ Issues Return
+1. **Check nix config**: Ensure `epkgs.zmq` not in packages.nix
+2. **Rebuild nix**: `cd ~/nix && nix run .#build-switch`  
+3. **Remove compiled files**: `rm -rf ~/.emacs.d/.local/straight/build*/zmq/`
+4. **Remove jupyter compiled files**: `rm -f ~/.emacs.d/.local/straight/build*/jupyter/*.elc`
+5. **Restart Emacs completely**
+
+### Working Kernel Types
+- **Python**: `jupyter-python` source blocks with `python3` kernel
+- **R**: `jupyter-R` source blocks with `ir` kernel  
+- **Stata**: `jupyter-stata` source blocks with `nbstata` kernel
+
+All use websocket/HTTP communication instead of ZMQ sockets.

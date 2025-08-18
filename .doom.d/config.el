@@ -1,6 +1,18 @@
 ;;; $DOOMDIR/config.el -*- lexical-binding: t; -*- Place your private configuration here! Remember, you do not need to run 'doom
 ;; sync' after modifying this file!
 
+;; CRITICAL: Prevent ZMQ from ever being enabled for Jupyter
+;; This guard prevents accidental ZMQ re-enablement that causes binary conflicts
+(defun prevent-zmq-loading ()
+  "Guard against ZMQ being loaded for Jupyter."
+  (when (and (boundp 'jupyter-use-zmq) jupyter-use-zmq)
+    (setq jupyter-use-zmq nil)
+    (message "WARNING: ZMQ was enabled for Jupyter - forcing it OFF to prevent binary conflicts")))
+
+;; Run the guard after Jupyter loads
+(with-eval-after-load 'jupyter
+  (prevent-zmq-loading))
+
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
 (setq user-full-name "John Doe"
