@@ -204,10 +204,7 @@ that should be monospace but are often hijacked by Apple Color Emoji."
  'org-babel-load-languages
  '((sas . t)
    (R . t)
-   ;; Don't load python here - we'll use our own
-   ;; (python . t)
    (stata . t)
-   ;; (jupyter . t)  ; Disabled to prevent ZMQ issues
    ))
 
 ;; Use advice to ensure our functions are always called
@@ -254,9 +251,6 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 (add-to-list 'org-src-lang-modes '("sas" . SAS))
 ;; Jupyter language mappings removed to prevent loading jupyter package
 
-;; Jupyter org-babel-execute functions removed to prevent loading jupyter package
-;; Use direct python, R, and stata blocks instead of jupyter-* blocks
-
 ;; Edit in same window
 ;; Doom now treats these buffers as pop-ups
 ;; which breaks the default behavior unless you tell it to ignore
@@ -265,6 +259,8 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 (after! vterm
   (set-popup-rule! "^\\*vterm " :ignore t))
 (setq org-src-window-setup 'current-window)
+
+;; use tectonic for pdf processing as it is faster
 (setq org-latex-pdf-process
   '("tectonic %f"))
 
@@ -285,20 +281,6 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 
 ;; need to have exec-path-from-shell in order to get PATH
 (exec-path-from-shell-initialize)
-
-;; eval-in-repl
-(use-package! eval-in-repl)
-(setq eir-repl-placement 'left)
-;; python support  
-;; The eval-in-repl-python functionality is included in the main eval-in-repl package
-(add-hook 'python-mode-hook
-          #'(lambda ()
-             (local-set-key (kbd "<C-return>") 'eir-eval-in-python)))
-;; Shell support
-;; The eval-in-repl-shell functionality is included in the main eval-in-repl package
-(add-hook 'sh-mode-hook
-          #'(lambda()
-             (local-set-key (kbd "C-<return>") 'eir-eval-in-shell)))
 
 ;; File-based logging for debugging
 (defvar jupyter-debug-log-file (expand-file-name "jupyter-debug.log" "~/"))
@@ -321,9 +303,6 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 ;; Initialize log
 (clear-jupyter-log)
 
-;; Test without loading ZMQ at all to isolate the issue
-(log-to-file "Skipping ZMQ loading to test if that's the source of the error")
-
 ;; Direnv integration for environment management
 (use-package! envrc
   :config
@@ -340,19 +319,6 @@ that should be monospace but are often hijacked by Apple Color Emoji."
     (when (and pixi-jupyter (file-executable-p pixi-jupyter))
       pixi-jupyter)))
 
-;; DISABLED - These were for the old jupyter package
-;; ;; Function to update jupyter paths for current project
-;; (defun update-jupyter-paths ()
-;;   "Update jupyter paths for current project."
-;;   (when-let ((jupyter-path (find-pixi-jupyter)))
-;;     (setq-local jupyter-command jupyter-path
-;;                 jupyter-executable jupyter-path
-;;                 org-babel-jupyter-command jupyter-path)
-;;     (message "Updated jupyter path to: %s" jupyter-path)))
-
-;; ;; Hook to update jupyter paths when entering a directory
-;; (add-hook 'find-file-hook #'update-jupyter-paths)
-
 ;; Simple logging for jupyter debugging
 (defvar jupyter-debug-log-file (expand-file-name "jupyter-debug.log" default-directory))
 
@@ -361,23 +327,5 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   (let ((message (apply #'format format-string args)))
     (message "%s: %s" (upcase (symbol-name level)) message)))
 
-;; STRATEGY A: DISABLED - Jupyter package removed to prevent ZMQ issues
-;; Using jupyter-console.el instead for org-babel jupyter functionality
-;; The old jupyter package configuration has been completely removed to avoid errors
-
-;; NOTE: All jupyter package code has been removed. The following block (lines 327-544)
-;; contained the old jupyter configuration which is no longer needed:
-;; - jupyter-run-repl functions
-;; - jupyter-connect-repl functions  
-;; - jupyter kernel startup overrides
-;; - ZMQ-related settings
-;; This has all been replaced by our simpler jupyter-console.el module
-
-;; PLACEHOLDER START - old jupyter code was here
-;; [All old jupyter configuration code removed - lines 336-552]
-;; PLACEHOLDER END - old jupyter code was here
 ;; keybindings
 (load! "bindings")
-
-;; Testing utilities (uncomment to test different Unicode approaches)
-;; (load! "test-unicode-fix")
