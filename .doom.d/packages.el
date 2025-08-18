@@ -26,9 +26,10 @@
 (package! catppuccin-theme)
 (package! nerd-icons)
 
-;; Jupyter integration  
-(package! jupyter)
-;; ZMQ provided by nix (epkgs.zmq) - disable Doom's zmq package
+;; Jupyter integration - DISABLED to prevent ZMQ issues
+;; Using alternative approaches for Jupyter functionality
+;; (package! jupyter)
+;; Completely disable ZMQ package 
 (package! zmq :disable t)
 
 ;; Direnv integration for pixi environments
