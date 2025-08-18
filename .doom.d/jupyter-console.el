@@ -198,7 +198,7 @@ Optionally associate with FILE."
           (jupyter-console-log 'debug "Raw output:\n%s" raw-output)
           
           ;; Extract the actual result
-          (jupyter-console-extract-output raw-output code)))))))
+          (jupyter-console-extract-output raw-output code))))))
 
 (defun jupyter-console-extract-output (raw-output code)
   "Extract clean output from RAW-OUTPUT, removing CODE echo and prompts."
