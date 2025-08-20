@@ -199,6 +199,34 @@
   (advice-add 'org-babel-execute:R :around #'jupyter-console-advice-org-babel-execute:R)
   (message "jupyter-console: Applied advice to org-babel-execute:R"))
 
+;; Use advice to ensure our Stata function always takes precedence
+(defun jupyter-console-advice-org-babel-execute:stata (orig-fun body params)
+  "Advice function to override org-babel-execute:stata with jupyter console integration."
+  (message "=== JUPYTER CONSOLE STATA ADVICE FUNCTION CALLED ===")
+  (let* ((file (buffer-file-name))
+         (buffer (jupyter-console-get-or-create "stata" file))
+         (result-params (cdr (assq :result-params params)))
+         (graphics-file (when (or (member "file" result-params)
+                                  (jupyter-console-detect-graphics-code body "stata"))
+                          (expand-file-name 
+                           (format "jupyter-stata-%d-%s.png" 
+                                   (random 10000)
+                                   (format-time-string "%H%M%S"))
+                           temporary-file-directory)))
+         (result (if graphics-file
+                    (progn
+                      (message "jupyter-console: Generating Stata graphics to %s" graphics-file)
+                      (jupyter-console-send-string-with-images buffer body "stata" graphics-file))
+                  (jupyter-console-send-string buffer body))))
+    (message "jupyter-console: Stata execution completed, result type: %s" 
+             (type-of result))
+    result))
+
+;; Apply advice after ob-stata loads
+(with-eval-after-load 'ob-stata
+  (advice-add 'org-babel-execute:stata :around #'jupyter-console-advice-org-babel-execute:stata)
+  (message "jupyter-console: Applied advice to org-babel-execute:stata"))
+
 ;; Force override even after org loads - this ensures our function takes precedence
 (with-eval-after-load 'ob-python
   (message "FORCING JUPYTER-CONSOLE OVERRIDE AFTER OB-PYTHON LOADS")

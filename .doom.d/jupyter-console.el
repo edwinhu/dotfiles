@@ -247,10 +247,22 @@ Converts multiline constructs to single-line assignments for Jupyter console com
             jupyter-console-image-dpi)))
 
 (defun jupyter-console--inject-stata-save (code image-file)
-  "Inject Stata save commands into Stata CODE."
-  (format "%s
-graph export \"%s\", replace
-" code image-file))
+  "Inject Stata save commands into Stata CODE.
+Converts multiline constructs with /// continuations to single-line commands for Jupyter console compatibility.
+Note: Stata kernel automatically saves to ~/.stata_kernel_cache/graph0.svg - we copy from there."
+  (let* ((base-code (if (string-match-p "///" code)
+                        ;; Multiline code with /// continuations - convert to single line
+                        (let* ((cleaned-code (replace-regexp-in-string 
+                                             "[ \t]*///[ \t]*\n[ \t]*" " " code))
+                               (final-code (string-trim cleaned-code)))
+                          final-code)
+                      ;; Single line code
+                      code))
+         (cache-svg (expand-file-name "~/.stata_kernel_cache/graph0.svg"))
+         (cache-pdf (expand-file-name "~/.stata_kernel_cache/graph0.pdf")))
+    ;; Execute the code, then copy from the cache location
+    (format "%s\n! cp \"%s\" \"%s\" 2>/dev/null || cp \"%s\" \"%s\" 2>/dev/null || echo \"Graph cache not found\"" 
+            base-code cache-svg image-file cache-pdf image-file)))
 
 ;;; Image Result Processing Functions
 
