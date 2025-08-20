@@ -32,6 +32,13 @@
   :type 'boolean
   :group 'jupyter-console)
 
+(defcustom jupyter-console-inline-images t
+  "Display images inline in the console buffer instead of popup windows.
+When t, images are embedded directly in the console buffer.
+When nil, images are displayed in separate popup windows."
+  :type 'boolean
+  :group 'jupyter-console)
+
 (defcustom jupyter-console-image-directory
   (or (bound-and-true-p org-babel-temporary-directory)
       temporary-file-directory)
@@ -181,14 +188,17 @@ Returns modified code if graphics detected, original code otherwise."
           (_ code)))
     code))
 
-(defun jupyter-console-inject-save-commands-to-file (code kernel target-file)
+(defun jupyter-console-inject-save-commands-to-file (code kernel target-file &optional interactive)
   "Inject image-saving commands into CODE for KERNEL using specific TARGET-FILE.
-Returns modified code if graphics detected, original code otherwise."
+Returns modified code if graphics detected, original code otherwise.
+INTERACTIVE determines if this is for interactive use (affects Python matplotlib backend)."
   (if (jupyter-console-detect-graphics-code code kernel)
       (progn
         (jupyter-console-track-generated-image target-file)
         (pcase kernel
-          ("python3" (jupyter-console--inject-python-save code target-file))
+          ("python3" (if interactive
+                        (jupyter-console--inject-python-interactive code target-file)
+                      (jupyter-console--inject-python-save code target-file)))
           ("ir" (jupyter-console--inject-r-save code target-file))
           ("stata" (jupyter-console--inject-stata-save code target-file))
           (_ code)))
@@ -212,6 +222,22 @@ plt.savefig(r'%s', bbox_inches='tight', dpi=%d, facecolor='white', edgecolor='no
 print('Plot saved successfully')
 " code image-file image-file jupyter-console-image-dpi)))
     save-code))
+
+(defun jupyter-console--inject-python-interactive (code image-file)
+  "Inject matplotlib code for interactive display with file save."
+  (let ((modified-code (replace-regexp-in-string "plt\\.show()" "" code)))
+    (format "# Force matplotlib to use non-interactive backend to prevent GUI windows
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+plt.ioff()
+plt.close('all')
+
+# User code
+%s
+
+# Save the current figure
+fig_list = plt.get_fignums(); plt.savefig(r'%s', bbox_inches='tight', dpi=%d, facecolor='white', edgecolor='none') if fig_list else None; print('Plot saved to: %s' if fig_list else 'No figure to save')" modified-code image-file jupyter-console-image-dpi image-file)))
 
 (defun jupyter-console--inject-r-save (code image-file)
   "Inject R save commands into R CODE.
@@ -274,17 +300,18 @@ Returns the file path if found, nil otherwise."
       (when (and recent-image (file-exists-p recent-image))
         recent-image))))
 
-(defun jupyter-console-send-string-with-images (buffer code kernel &optional image-file)
+(defun jupyter-console-send-string-with-images (buffer code kernel &optional image-file interactive)
   "Enhanced version of jupyter-console-send-string that handles image generation.
 BUFFER is the jupyter console buffer, CODE is the code to execute, 
 KERNEL is the kernel type (python3, ir, stata).
-IMAGE-FILE is the optional specific file path to save the image to."
+IMAGE-FILE is the optional specific file path to save the image to.
+INTERACTIVE determines if this is called from interactive functions (affects matplotlib backend choice)."
   (let* ((original-code code)
          (has-graphics (jupyter-console-detect-graphics-code code kernel))
          (target-file (or image-file 
                          (when has-graphics (jupyter-console-generate-image-filename kernel))))
          (modified-code (if has-graphics 
-                           (jupyter-console-inject-save-commands-to-file code kernel target-file)
+                           (jupyter-console-inject-save-commands-to-file code kernel target-file interactive)
                          code))
          (text-result (jupyter-console-send-string buffer modified-code)))
     
@@ -313,8 +340,33 @@ IMAGE-FILE is the optional specific file path to save the image to."
       (message "jupyter-console: Returning text result")
       text-result))))
 
-(defun jupyter-console-display-image-in-buffer (image-file buffer)
-  "Display IMAGE-FILE in BUFFER or in a popup window."
+(defun jupyter-console-display-image-inline (image-file buffer)
+  "Display IMAGE-FILE inline in the jupyter console BUFFER."
+  (when (and image-file (file-exists-p image-file))
+    (message "jupyter-console: Displaying image inline: %s" image-file)
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t)
+            (original-point (point)))
+        ;; Go to end of buffer and insert image
+        (goto-char (point-max))
+        (insert "\n\n")
+        ;; Insert the actual image, not just text
+        (let ((image (create-image image-file nil nil :max-width 500 :max-height 300)))
+          (if (display-images-p)
+              (progn
+                (insert-image image)
+                (insert (format "\n[Image: %s]\n" (file-name-nondirectory image-file))))
+            ;; Fallback for non-GUI displays
+            (insert (format "[Image: %s]\n" (file-name-nondirectory image-file)))))
+        ;; Move cursor to end
+        (goto-char (point-max))
+        ;; Force buffer redisplay
+        (when (get-buffer-window buffer)
+          (with-selected-window (get-buffer-window buffer)
+            (recenter-top-bottom -1)))))))
+
+(defun jupyter-console-display-image-popup (image-file)
+  "Display IMAGE-FILE in a popup window (fallback or full-size view)."
   (when (and image-file (file-exists-p image-file))
     (let ((image-buffer (get-buffer-create "*Jupyter Console Image*")))
       (with-current-buffer image-buffer
@@ -328,6 +380,12 @@ IMAGE-FILE is the optional specific file path to save the image to."
                          display-buffer-pop-up-window)
                         (window-height . 0.6)
                         (window-width . 0.6))))))
+
+(defun jupyter-console-display-image-in-buffer (image-file buffer)
+  "Display IMAGE-FILE either inline or in popup based on configuration."
+  (if jupyter-console-inline-images
+      (jupyter-console-display-image-inline image-file buffer)
+    (jupyter-console-display-image-popup image-file)))
 
 (defun jupyter-console-buffer-name (kernel file)
   "Generate buffer name for KERNEL associated with FILE."
@@ -537,10 +595,20 @@ Optionally associate with FILE."
   (message "jupyter-console: Executing Python code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "python3" file))
-         (result (jupyter-console-send-string-with-images buffer body "python3")))
+         (results-type (cdr (assq :results params)))
+         (has-graphics (jupyter-console-detect-graphics-code body "python3"))
+         (result (if has-graphics
+                    ;; For graphics code, use non-interactive mode to get file path
+                    (jupyter-console-send-string-with-images buffer body "python3" nil nil)
+                  ;; For non-graphics code, use regular execution
+                  (jupyter-console-send-string buffer body))))
     (message "jupyter-console: Python execution completed, result type: %s, result: %s" 
              (type-of result) result)
-    result))
+    ;; For :results file, always return the file path
+    (if (and has-graphics (string-match-p "file" (or results-type "")))
+        result
+      ;; For other results types, return text result
+      (if (and result (file-exists-p result)) nil result))))
 
 (defun org-babel-execute:R (body params)
   "Execute R BODY with PARAMS using jupyter console."
@@ -664,7 +732,7 @@ If SHOW-BUFFER is non-nil, display the console buffer."
           (when (fboundp 'sas-console-send-string)
             (sas-console-send-string buffer trimmed-code))
         ;; Use standard jupyter console send function with image support
-        (let ((result (jupyter-console-send-string-with-images buffer trimmed-code kernel)))
+        (let ((result (jupyter-console-send-string-with-images buffer trimmed-code kernel nil t)))
           ;; If we got an image result in interactive mode, show it
           (when (and show-buffer result (file-exists-p result))
             (jupyter-console-display-image-in-buffer result buffer))
