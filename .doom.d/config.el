@@ -380,7 +380,91 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   (envrc-global-mode)
   ;; Ensure envrc updates exec-path and PATH
   ;; (setq envrc-debug t)  ; Enable debug mode for troubleshooting
-  )
+  
+  ;; Smart direnv allow checking - only prompt for genuinely new .envrc files
+  (defcustom envrc-smart-allow-checking t
+    "When non-nil, check direnv status before prompting for allow.
+This prevents repeated prompts for .envrc files that were previously allowed."
+    :type 'boolean
+    :group 'envrc)
+
+  (defun envrc--check-direnv-status (env-dir)
+    "Check if ENV-DIR's .envrc is already allowed by parsing direnv status.
+Returns 'allowed if the .envrc is loaded, 'blocked if it exists but not loaded,
+or 'none if no .envrc exists."
+    (let* ((default-directory env-dir)
+           (status-output (with-temp-buffer
+                           (when (zerop (call-process envrc-direnv-executable nil t nil "status"))
+                             (buffer-string)))))
+      (cond
+       ;; No .envrc file at all
+       ((and status-output
+             (string-match-p "No .envrc.*found" status-output))
+        'none)
+       
+       ;; .envrc is allowed and loaded (status will show RC allowed 1 or higher but not 2)
+       ((and status-output 
+             (string-match-p "Found RC allowed 1" status-output)
+             (not (string-match-p "No .envrc.*loaded" status-output)))
+        'allowed)
+        
+       ;; .envrc exists but is denied (Found RC allowed 2)
+       ((and status-output
+             (string-match-p "Found RC allowed 2" status-output))
+        'denied)
+       
+       ;; .envrc exists but not loaded (has "Found RC path" but "No .envrc loaded")
+       ((and (envrc--env-dir-p env-dir)
+             status-output
+             (string-match-p "Found RC path" status-output)
+             (string-match-p "No .envrc.*loaded" status-output))
+        'blocked)
+       
+       ;; Default fallback
+       (t 'none))))
+
+  (defun envrc--smart-export (env-dir)
+    "Smart version of envrc--export that checks allow status first.
+Only prompts for permission if the .envrc file is genuinely new/blocked."
+    (if (not envrc-smart-allow-checking)
+        ;; Fall back to original behavior if disabled
+        (envrc--export-original env-dir)
+      
+      ;; Check status first
+      (let ((status (envrc--check-direnv-status env-dir)))
+        (cond
+         ;; Already allowed - proceed silently
+         ((eq status 'allowed)
+          (envrc--export-original env-dir))
+         
+         ;; Blocked or denied - offer to allow
+         ((or (eq status 'blocked) (eq status 'denied))
+          (let ((prompt-msg (if (eq status 'denied)
+                               (format "Directory %s has .envrc but is denied. Allow it? " env-dir)
+                               (format "Directory %s has .envrc but is not allowed. Allow it? " env-dir))))
+            (if (y-or-n-p prompt-msg)
+                (progn
+                  (let* ((default-directory env-dir)
+                         (exit-code (envrc--call-process-with-global-env 
+                                    envrc-direnv-executable nil 
+                                    (get-buffer-create "*envrc-allow*") 
+                                    nil "allow")))
+                    (if (zerop exit-code)
+                        (progn
+                          (message "Allowed .envrc in %s" env-dir)
+                          (envrc--export-original env-dir))
+                      (display-buffer "*envrc-allow*")
+                      (user-error "Error running direnv allow"))))
+              'error)))
+         
+         ;; No .envrc file
+         (t 'none)))))
+
+  ;; Store original function and add advice
+  (unless (fboundp 'envrc--export-original)
+    (fset 'envrc--export-original (symbol-function 'envrc--export)))
+  
+  (advice-add 'envrc--export :override #'envrc--smart-export))
 
 ;; Function to find jupyter in pixi environment - kept for jupyter-console.el
 (defun find-pixi-jupyter ()
