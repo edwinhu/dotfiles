@@ -71,7 +71,7 @@
 ;; only ':results output' currently works, so make that the default
 (defvar org-babel-default-header-args:sas '((:results . "output")))
 
-(defcustom org-babel-sas-command "sas -rsasuser -noovp -nosyntaxcheck -stdio -nodate -nonumber -nocenter -linesize MAX"
+(defcustom org-babel-sas-command "sas -rsasuser -noovp -nosyntaxcheck -nonews -nonotes -stdio -nodate -nonumber -nocenter -linesize MAX"
   "Name of command to use for executing sas code."
   :group 'org-babel
   :version "24.4"
@@ -135,7 +135,10 @@ This function is called by `org-babel-execute-src-block'."
   (save-window-excursion
     (let ((buffer (org-babel-prep-session:sas session params)))
       (with-current-buffer buffer
-        (goto-char (process-mark (get-buffer-process (current-buffer))))
+        (let ((proc (get-buffer-process (current-buffer))))
+          (if proc
+              (goto-char (process-mark proc))
+            (goto-char (point-max))))
         (insert (org-babel-chomp body)))
       buffer)))
 
@@ -214,8 +217,9 @@ This function is called by `org-babel-execute-src-block'."
   "Associate sas code buffer with a sas session.
 Make SESSION be the inferior ESS process associated with the
 current code buffer."
-  (setq ess-local-process-name
-	(process-name (get-buffer-process session)))
+  (let ((proc (get-buffer-process session)))
+    (when proc
+      (setq ess-local-process-name (process-name proc))))
   (ess-make-buffer-current))
 
 (defun org-babel-sas-graphical-output-file (params)
@@ -269,9 +273,10 @@ last statement in BODY, as elisp."
     (value
      (with-temp-buffer
        (insert (org-babel-chomp body))
-       (let ((ess-local-process-name
-	      (process-name (get-buffer-process session)))
-	     (ess-eval-visibly-p nil))
+       (let ((proc (get-buffer-process session))
+             (ess-eval-visibly-p nil))
+         (when proc
+           (setq ess-local-process-name (process-name proc)))
 	 (ess-eval-buffer nil)))
      (let ((tmp-file (org-babel-temp-file "sas-")))
        (org-babel-comint-eval-invisibly-and-wait-for-file
@@ -310,6 +315,91 @@ Insert hline if column names in output have been requested."
   (if column-names-p
       (cons (car result) (cons 'hline (cdr result)))
     result))
+
+;;; SAS-mode definition for org-src blocks
+
+(define-derived-mode SAS-mode prog-mode "SAS"
+  "Major mode for editing SAS source code.
+This is a minimal implementation to support org-babel editing."
+  
+  ;; Set comment syntax
+  (setq-local comment-start "/* ")
+  (setq-local comment-end " */")
+  (setq-local comment-start-skip "/\\*+\\s *")
+  
+  ;; Also support // comments
+  (setq-local comment-start-skip "\\(//+\\|/\\*+\\)\\s *")
+  
+  ;; Basic syntax highlighting
+  (setq-local font-lock-defaults
+              '(sas-font-lock-keywords nil nil nil nil))
+  
+  ;; Indentation settings
+  (setq-local indent-line-function 'sas-indent-line)
+  (setq-local tab-width 4)
+  
+  ;; Add cleanup hook for org-src-mode
+  (when (bound-and-true-p org-src-mode)
+    (add-hook 'kill-buffer-hook #'sas-mode-cleanup nil t)))
+
+(defun sas-mode-cleanup ()
+  "Cleanup function for SAS-mode when used in org-src buffers."
+  (when (bound-and-true-p org-src-mode)
+    ;; Clear any persistent fontification
+    (font-lock-mode -1)
+    (font-lock-mode 1)))
+
+;; Font lock keywords for SAS syntax highlighting
+(defconst sas-font-lock-keywords
+  (list
+   ;; Keywords
+   '("\\<\\(data\\|proc\\|run\\|quit\\|if\\|then\\|else\\|do\\|end\\|while\\|until\\|for\\|to\\|by\\|output\\|delete\\|stop\\|return\\|goto\\|link\\|select\\|when\\|otherwise\\|where\\|set\\|merge\\|update\\|modify\\|retain\\|drop\\|keep\\|rename\\|label\\|format\\|informat\\|length\\|array\\|call\\|put\\|input\\|file\\|infile\\|cards\\|datalines\\|options\\|title\\|footnote\\|libname\\|filename\\|macro\\|mend\\|global\\|local\\|let\\|sysfunc\\|symput\\|symget\\)\\>" 
+     . font-lock-keyword-face)
+   ;; Procedures
+   '("\\<proc\\s-+\\(\\w+\\)\\>" 1 font-lock-builtin-face)
+   ;; Functions
+   '("\\<\\(sum\\|mean\\|min\\|max\\|std\\|var\\|n\\|nmiss\\|count\\|freq\\|substr\\|trim\\|upcase\\|lowcase\\|compress\\|scan\\|index\\|length\\|cats\\|catx\\|put\\|input\\|round\\|ceil\\|floor\\|abs\\|sqrt\\|log\\|exp\\|sin\\|cos\\|tan\\|rand\\|uniform\\|normal\\|today\\|date\\|datepart\\|timepart\\|year\\|month\\|day\\|weekday\\|hour\\|minute\\|second\\)\\>("
+     . font-lock-function-name-face)
+   ;; Variables and dataset names
+   '("\\<[a-zA-Z_][a-zA-Z0-9_]*\\>" . font-lock-variable-name-face)
+   ;; Numbers
+   '("\\<[0-9]+\\(\\.[0-9]+\\)?\\>" . font-lock-constant-face)
+   ;; Strings
+   '("\"[^\"]*\"\\|'[^']*'" . font-lock-string-face)
+   ;; Comments (/* */ style)
+   '("/\\*.*?\\*/" . font-lock-comment-face)
+   ;; Comments (// style)  
+   '("//.*$" . font-lock-comment-face)
+   ;; Macro variables
+   '("&[a-zA-Z_][a-zA-Z0-9_]*" . font-lock-variable-name-face))
+  "Syntax highlighting for SAS mode.")
+
+;; Simple indentation function
+(defun sas-indent-line ()
+  "Indent current line as SAS code."
+  (interactive)
+  (let ((indent-level 0))
+    (save-excursion
+      (beginning-of-line)
+      (if (bobp)
+          (setq indent-level 0)
+        ;; Simple indentation: increase after data/proc, decrease at run/quit
+        (save-excursion
+          (forward-line -1)
+          (beginning-of-line)
+          (cond
+           ((looking-at "\\s-*\\(data\\|proc\\)\\>")
+            (setq indent-level tab-width))
+           ((looking-at "\\s-*\\(run\\|quit\\)\\s-*;")
+            (setq indent-level 0))
+           (t (setq indent-level 0))))))
+    
+    (beginning-of-line)
+    (delete-horizontal-space)
+    (indent-to indent-level)))
+
+;; Register SAS-mode for .sas files
+(add-to-list 'auto-mode-alist '("\\.sas\\'" . SAS-mode))
 
 (provide 'ob-sas)
 

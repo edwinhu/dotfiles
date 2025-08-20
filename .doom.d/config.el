@@ -23,8 +23,8 @@
 ;;
 ;; They all accept either a font-spec, font string ("Input Mono-12"), or xlfd
 ;; font string. You generally only need these two:
-(setq doom-font (font-spec :family "JetBrains Mono" :size 14)
-      doom-variable-pitch-font (font-spec :family "CMU Serif" :size 14))
+(setq doom-font (font-spec :family "JetBrains Mono" :size 13.0 :dpi 96 :weight 'regular)
+      doom-variable-pitch-font (font-spec :family "CMU Serif" :size 13.0 :dpi 96))
 
 ;; There are two ways to load a theme. Both assume the theme is installed and
 ;; available. You can either set `doom-theme' or manually load a theme with the
@@ -100,7 +100,12 @@
               ;; Disable whitespace visualization
               (when (fboundp 'whitespace-mode) (whitespace-mode -1))
               (setq-local show-trailing-whitespace nil)
-              (setq-local nobreak-char-display nil))))
+              (setq-local nobreak-char-display nil)))
+  
+  ;; Better integration with TRAMP and remote sessions
+  (setq vterm-max-scrollback 10000)  ; Increase scrollback for long sessions
+  (setq vterm-kill-buffer-on-exit t) ; Clean up buffers when sessions end
+  )
 
 ;; Test vterm instead of eat for better Unicode handling
 (setq +term-backend 'vterm)
@@ -210,42 +215,96 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 (defun +jupyter-console-python-advice (body params)
   "Advice to use jupyter-console for Python."
   (require 'jupyter-console)
-  (jupyter-console-log 'info "Python advice called")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "python3" file))
          (result (jupyter-console-send-string buffer body)))
-    (jupyter-console-log 'info "Python execution completed via advice")
     result))
 
 (defun +jupyter-console-stata-advice (body params)
   "Advice to use jupyter-console for Stata."
   (require 'jupyter-console)
-  (jupyter-console-log 'info "Stata advice called")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "stata" file))
          (result (jupyter-console-send-string buffer body)))
-    (jupyter-console-log 'info "Stata execution completed via advice")
     result))
 
 (defun +jupyter-console-r-advice (body params)
   "Advice to use jupyter-console for R."
   (require 'jupyter-console)
-  (jupyter-console-log 'info "R advice called")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "ir" file))
          (result (jupyter-console-send-string buffer body)))
-    (jupyter-console-log 'info "R execution completed via advice")
     result))
 
-;; Add advice after org loads
+(defun +sas-console-execute (body params)
+  "Execute SAS code using sas-console (interactive isas sessions)."
+  (require 'sas-console)
+  (require 'wrds-debug)
+  
+  (wrds-debug-log 'info "+sas-console-execute called (SUCCESS: advice working)")
+  
+  (let* ((session (cdr (assoc :session params)))
+         (result-type (cdr (assoc :result-type params)))
+         (full-body (org-babel-expand-body:generic body params))
+         ;; Use same file detection logic as jupyter-console-send-region
+         (file (or (buffer-file-name)
+                   (and (boundp 'org-src-source-file-name)
+                        org-src-source-file-name))))
+    
+    (wrds-debug-log 'info "Parameters: session=%s, file=%s" session file)
+    (wrds-debug-log-sas "execute" full-body session)
+    
+    (if (and session (string-match "/sshx:" session))
+        ;; Remote execution via sas-console
+        (progn
+          (wrds-debug-log 'info "Using sas-console for remote SAS execution")
+          (let ((console-buffer (sas-console-get-or-create session file)))
+            (if console-buffer
+                (condition-case err
+                    (let ((result (sas-console-send-string console-buffer full-body)))
+                      (wrds-debug-log-sas "result" result session)
+                      result)
+                  (error
+                   (wrds-debug-log 'error "SAS console execution failed: %s" err)
+                   (format "ERROR: %s" err)))
+              (progn
+                (wrds-debug-log 'error "Failed to create SAS console")
+                "ERROR: Failed to create SAS console"))))
+      
+      ;; Local execution - try sas-console first, then fall back
+      (condition-case err
+          (progn
+            (wrds-debug-log 'info "Attempting local sas-console execution")
+            (let ((console-buffer (sas-console-get-or-create nil file)))
+              (if console-buffer
+                  (sas-console-send-string console-buffer full-body)
+                (error "Local SAS console not available"))))
+        (error
+         (wrds-debug-log 'warn "Local sas-console failed, falling back to ob-sas: %s" err)
+         ;; Provide better error message for remote users
+         (if (string-match "Local SAS not available" (error-message-string err))
+             (format "ERROR: %s\nHINT: Add ':session /sshx:wrds|qrsh::/' to your SAS source block for remote execution" 
+                     (error-message-string err))
+           ;; Fall back to standard ob-sas for other errors
+           (org-babel-execute:sas body params)))))))
+
+;; Add advice after org loads - and ensure it runs after ESS loads too
 (with-eval-after-load 'org
   (with-eval-after-load 'ob
     (require 'jupyter-console)
     ;; Use advice-add with override to ensure our functions run
     (advice-add 'org-babel-execute:python :override #'+jupyter-console-python-advice)
     (advice-add 'org-babel-execute:stata :override #'+jupyter-console-stata-advice)
-    (advice-add 'org-babel-execute:R :override #'+jupyter-console-r-advice)
-    (jupyter-console-log 'info "Jupyter console advice installed")))
+    (advice-add 'org-babel-execute:R :override #'+jupyter-console-r-advice)))
+
+;; Install SAS advice after ESS loads to ensure we override ESS's version
+(with-eval-after-load 'ess
+  (with-eval-after-load 'ob-sas
+    (advice-add 'org-babel-execute:sas :override #'+sas-console-execute)
+    (message "SAS console advice installed (overriding ESS)")
+    ;; Log after wrds-debug is available
+    (when (fboundp 'wrds-debug-log)
+      (wrds-debug-log 'info "SAS console advice installed (overriding ESS)"))))
 ;; Language mode mappings for syntax highlighting in org source blocks
 (add-to-list 'org-src-lang-modes '("sas" . SAS))
 ;; Jupyter language mappings removed to prevent loading jupyter package
@@ -254,10 +313,23 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 ;; Doom now treats these buffers as pop-ups
 ;; which breaks the default behavior unless you tell it to ignore
 (after! org
-  (set-popup-rule! "^\\*Org Src" :ignore t))
+  (set-popup-rule! "^\\*Org Src" :ignore t)
+  (set-popup-rule! "^\\*SAS Console" :ignore t))
 (after! vterm
   (set-popup-rule! "^\\*vterm " :ignore t))
 (setq org-src-window-setup 'current-window)
+
+;; Auto-open SAS console for SAS org-src blocks
+;; Disabled auto-opening SAS console on C-' - user prefers it to start only on C-RET
+;; (after! sas-console
+;;   (defun +sas-console-org-src-hook ()
+;;     "Hook to auto-open SAS console when editing SAS source blocks."
+;;     (when (and (bound-and-true-p org-src-mode)
+;;                (eq (org-src-get-lang-mode "sas") major-mode))
+;;       ;; Delay slightly to let org-src-mode fully initialize
+;;       (run-with-timer 0.1 nil #'sas-console-open-for-org-src)))
+;;   
+;;   (add-hook 'org-src-mode-hook #'+sas-console-org-src-hook))
 
 ;; use tectonic for pdf processing as it is faster
 (setq org-latex-pdf-process
@@ -281,33 +353,34 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 ;; need to have exec-path-from-shell in order to get PATH
 (exec-path-from-shell-initialize)
 
-;; File-based logging for debugging
-(defvar jupyter-debug-log-file (expand-file-name "jupyter-debug.log" "~/"))
-
-(defun log-to-file (message)
-  "Log MESSAGE to debug file with timestamp"
-  (with-temp-buffer
-    (insert (format "[%s] %s\n" 
-                    (format-time-string "%Y-%m-%d %H:%M:%S") 
-                    message))
-    (append-to-file (point-min) (point-max) jupyter-debug-log-file)))
-
-(defun clear-jupyter-log ()
-  "Clear the jupyter debug log file"
-  (interactive)
-  (when (file-exists-p jupyter-debug-log-file)
-    (delete-file jupyter-debug-log-file))
-  (log-to-file "=== Jupyter Debug Log Started ==="))
-
-;; Initialize log
-(clear-jupyter-log)
+;; ;; File-based logging for debugging
+;; (defvar jupyter-debug-log-file (expand-file-name "jupyter-debug.log" "~/"))
+;; 
+;; (defun log-to-file (message)
+;;   "Log MESSAGE to debug file with timestamp"
+;;   (with-temp-buffer
+;;     (insert (format "[%s] %s\n" 
+;;                     (format-time-string "%Y-%m-%d %H:%M:%S") 
+;;                     message))
+;;     (append-to-file (point-min) (point-max) jupyter-debug-log-file)))
+;; 
+;; (defun clear-jupyter-log ()
+;;   "Clear the jupyter debug log file"
+;;   (interactive)
+;;   (when (file-exists-p jupyter-debug-log-file)
+;;     (delete-file jupyter-debug-log-file))
+;;   (log-to-file "=== Jupyter Debug Log Started ==="))
+;; 
+;; ;; Initialize log
+;; (clear-jupyter-log)
 
 ;; Direnv integration for environment management
 (use-package! envrc
   :config
   (envrc-global-mode)
   ;; Ensure envrc updates exec-path and PATH
-  (setq envrc-debug t)) ; Enable debug mode for troubleshooting
+  ;; (setq envrc-debug t)  ; Enable debug mode for troubleshooting
+  )
 
 ;; Function to find jupyter in pixi environment - kept for jupyter-console.el
 (defun find-pixi-jupyter ()
@@ -318,13 +391,36 @@ that should be monospace but are often hijacked by Apple Color Emoji."
     (when (and pixi-jupyter (file-executable-p pixi-jupyter))
       pixi-jupyter)))
 
-;; Simple logging for jupyter debugging
-(defvar jupyter-debug-log-file (expand-file-name "jupyter-debug.log" default-directory))
+;; ;; Simple logging for jupyter debugging
+;; (defvar jupyter-debug-log-file (expand-file-name "jupyter-debug.log" default-directory))
+;; 
+;; (defun jupyter-debug-log (level format-string &rest args)
+;;   "Simple logging function."
+;;   (let ((message (apply #'format format-string args)))
+;;     (message "%s: %s" (upcase (symbol-name level)) message)))
 
-(defun jupyter-debug-log (level format-string &rest args)
-  "Simple logging function."
-  (let ((message (apply #'format format-string args)))
-    (message "%s: %s" (upcase (symbol-name level)) message)))
+;; WRDS debugging system
+(use-package! wrds-debug
+  :load-path "~/.doom.d/"
+  :config
+  ;; Enable debug logging by default for now
+  (setq wrds-debug-enabled t))
+
+;; SAS console system  
+(use-package! sas-console
+  :load-path "~/.doom.d/"
+  :after (wrds-debug))
+
+;; TRAMP configuration for WRDS qrsh integration
+(use-package! tramp-wrds
+  :load-path "~/.doom.d/"
+  :after (tramp wrds-debug)
+  :config
+  ;; Optional: Enable verbose logging for initial testing
+  ;; (setq tramp-verbose 6)
+  ;; Optional: Set up default WRDS host if you have a specific server
+  ;; (add-to-list 'tramp-default-host-alist '("sshx" nil "wrds-cloud.wharton.upenn.edu"))
+  )
 
 ;; keybindings
 (load! "bindings")

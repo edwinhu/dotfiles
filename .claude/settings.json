@@ -1,4 +1,7 @@
 {
+  "env": {
+    "_ZO_DOCTOR": "0"
+  },
   "permissions": {
     "allow": [
       "Bash(echo:*)",
@@ -27,7 +30,9 @@
       "~/Documents/Notes/foam/"
     ]
   },
-  "env": {
-    "_ZO_DOCTOR": "0"
-  }
+  "statusLine": {
+    "type": "command",
+    "command": "input=$(cat); model=$(echo \"$input\" | jq -r '.model.display_name'); output_style=$(echo \"$input\" | jq -r '.output_style.name'); project_dir=$(echo \"$input\" | jq -r '.workspace.project_dir'); current_dir=$(echo \"$input\" | jq -r '.workspace.current_dir'); rel_dir=$(echo \"${current_dir#$project_dir}\"); if [[ \"$rel_dir\" == \"$current_dir\" ]]; then rel_dir=\"~${current_dir#$HOME}\"; else rel_dir=\"${rel_dir#/}\"; fi; printf \"\\033[2m\\033[38;2;137;180;250m%s\\033[0m \\033[2m\\033[38;2;166;227;161min\\033[0m \\033[2m\\033[38;2;203;166;247m%s\\033[0m \\033[2m\\033[38;2;148;226;213m[%s]\\033[0m\" \"$model\" \"${rel_dir:-./}\" \"$output_style\""
+  },
+  "model": "opusplan"
 }

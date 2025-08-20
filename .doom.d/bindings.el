@@ -2,6 +2,20 @@
 
 (map! :map global-map "M-Q" #'unfill-paragraph)
 
+;; SAS console keybindings
+(after! sas-console
+  ;; Global SAS console commands
+  (map! "C-c s o" #'sas-console-open
+        "C-c s s" #'sas-console-open-split
+        "C-c s k" #'sas-console-kill-all-sessions
+        "C-c s l" #'sas-console-list-sessions)
+  
+  ;; Keybindings for org-src-mode (when editing SAS source blocks)
+  (map! :map org-src-mode-map
+        "C-<return>" #'sas-console-send-line
+        "C-c C-<return>" #'sas-console-send-region
+        "C-c s" #'sas-console-open-for-org-src))
+
 ;; Terminal testing keybindings
 (map! "C-c t v" #'vterm
       "C-c t e" #'eat

@@ -1,5 +1,7 @@
 # Project Context
 
+Stop saying "You're absolutely [right/correct/spot on]!" or similar phrases. Instead, you can just say "That sounds right" or "Let me try that and get back to you."
+
 ## Available Command Line Utilities
 
 The following additional command line tools are available for use:

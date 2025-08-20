@@ -14,11 +14,11 @@
   "Jupyter console integration for org-babel."
   :group 'org-babel)
 
-(defcustom jupyter-console-log-file
-  (expand-file-name "~/jupyter-console.log")
-  "Path to the jupyter console debug log file."
-  :type 'file
-  :group 'jupyter-console)
+;; (defcustom jupyter-console-log-file
+;;   (expand-file-name "~/jupyter-console.log")
+;;   "Path to the jupyter console debug log file."
+;;   :type 'file
+;;   :group 'jupyter-console)
 
 (defcustom jupyter-console-prompt-regexp
   "\\(?:In \\[[0-9]+\\]: \\|>>> \\|\\.\\.\\. \\|> \\|\\.\\.\\.\\)"
@@ -32,23 +32,23 @@
 (defvar jupyter-console-first-run (make-hash-table :test 'equal)
   "Track if this is the first command sent to a buffer.")
 
-(defun jupyter-console-log (level format-string &rest args)
-  "Log to jupyter console debug file.
-LEVEL is the log level (info, debug, warn, error).
-FORMAT-STRING and ARGS are passed to `format'."
-  (when jupyter-console-log-file
-    (let ((message (apply #'format format-string args))
-          (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
-      (with-temp-buffer
-        (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
-        (append-to-file (point-min) (point-max) jupyter-console-log-file)))))
+;; (defun jupyter-console-log (level format-string &rest args)
+;;   "Log to jupyter console debug file.
+;; LEVEL is the log level (info, debug, warn, error).
+;; FORMAT-STRING and ARGS are passed to `format'."
+;;   (when jupyter-console-log-file
+;;     (let ((message (apply #'format format-string args))
+;;           (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+;;       (with-temp-buffer
+;;         (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+;;         (append-to-file (point-min) (point-max) jupyter-console-log-file)))))
 
-(defun jupyter-console-clear-log ()
-  "Clear the jupyter console log file."
-  (interactive)
-  (when (file-exists-p jupyter-console-log-file)
-    (delete-file jupyter-console-log-file))
-  (jupyter-console-log 'info "=== Jupyter Console Log Started ==="))
+;; (defun jupyter-console-clear-log ()
+;;   "Clear the jupyter console log file."
+;;   (interactive)
+;;   (when (file-exists-p jupyter-console-log-file)
+;;     (delete-file jupyter-console-log-file))
+;;   (jupyter-console-log 'info "=== Jupyter Console Log Started ==="))
 
 (defun jupyter-console-buffer-name (kernel file)
   "Generate buffer name for KERNEL associated with FILE."
@@ -102,17 +102,17 @@ Optionally associate it with FILE."
     ;; Show user feedback
     (message "Starting Jupyter %s kernel... (this may take a few seconds)" kernel)
     
-    (jupyter-console-log 'info "Starting jupyter console for kernel: %s" kernel)
-    (jupyter-console-log 'debug "Buffer name: %s" buffer-name)
-    (jupyter-console-log 'debug "Jupyter command: %s" jupyter-cmd)
+    ;; (jupyter-console-log 'info "Starting jupyter console for kernel: %s" kernel)
+    ;; (jupyter-console-log 'debug "Buffer name: %s" buffer-name)
+    ;; (jupyter-console-log 'debug "Jupyter command: %s" jupyter-cmd)
     
     (with-current-buffer process-buffer
       (unless (comint-check-proc process-buffer)
         (let* ((cmd-args (list jupyter-cmd "console" "--kernel" kernel "--simple-prompt"))
                (default-directory (or (and file (file-name-directory file))
                                      default-directory)))
-          (jupyter-console-log 'debug "Command: %s" (mapconcat 'identity cmd-args " "))
-          (jupyter-console-log 'debug "Directory: %s" default-directory)
+          ;; (jupyter-console-log 'debug "Command: %s" (mapconcat 'identity cmd-args " "))
+          ;; (jupyter-console-log 'debug "Directory: %s" default-directory)
           
           (setq process (apply 'make-comint-in-buffer
                               (format "jupyter-console-%s" kernel)
@@ -122,7 +122,7 @@ Optionally associate it with FILE."
                               (cdr cmd-args)))
           
           (when process
-            (jupyter-console-log 'info "Process started successfully")
+            ;; (jupyter-console-log 'info "Process started successfully")
             (comint-mode)
             (setq-local comint-prompt-regexp jupyter-console-prompt-regexp)
             (setq-local comint-prompt-read-only t)
@@ -133,10 +133,12 @@ Optionally associate it with FILE."
             (if (jupyter-console-wait-for-prompt process-buffer 6)
                 (progn
                   (message "%s kernel is ready!" kernel)
-                  (jupyter-console-log 'info "Console ready for kernel: %s" kernel))
+                  ;; (jupyter-console-log 'info "Console ready for kernel: %s" kernel)
+                  )
               ;; Even if we don't see a perfect prompt, if we got output, continue
               (message "%s kernel started (may still be initializing)" kernel)
-              (jupyter-console-log 'info "Kernel %s started" kernel))))))
+              ;; (jupyter-console-log 'info "Kernel %s started" kernel)
+)))))
     
     process-buffer))
 
@@ -150,13 +152,13 @@ Optionally associate with FILE."
                           (buffer-file-name)))
          (key (cons actual-file kernel))
          (existing-buffer (gethash key jupyter-console-buffers)))
-    (jupyter-console-log 'debug "Getting console for kernel=%s file=%s" kernel actual-file)
+    ;; (jupyter-console-log 'debug "Getting console for kernel=%s file=%s" kernel actual-file)
     (if (and existing-buffer 
              (buffer-live-p existing-buffer)
              (comint-check-proc existing-buffer))
         (progn
-          (jupyter-console-log 'debug "Using existing console buffer: %s" 
-                              (buffer-name existing-buffer))
+          ;; (jupyter-console-log 'debug "Using existing console buffer: %s" 
+          ;;                     (buffer-name existing-buffer))
           existing-buffer)
       ;; Create new buffer and store it
       (let ((new-buffer (jupyter-console-start-process kernel actual-file)))
@@ -165,8 +167,8 @@ Optionally associate with FILE."
 
 (defun jupyter-console-send-string (buffer code)
   "Send CODE to jupyter console BUFFER and wait for output."
-  (jupyter-console-log 'debug "Sending code to buffer %s:\n%s" 
-                      (buffer-name buffer) code)
+  ;; (jupyter-console-log 'debug "Sending code to buffer %s:\n%s" 
+  ;;                     (buffer-name buffer) code)
   
   (with-current-buffer buffer
     (let ((proc (get-buffer-process buffer))
@@ -195,14 +197,14 @@ Optionally associate with FILE."
         (let* ((output-end (point))
                (raw-output (buffer-substring-no-properties output-start output-end)))
           
-          (jupyter-console-log 'debug "Raw output:\n%s" raw-output)
+          ;; (jupyter-console-log 'debug "Raw output:\n%s" raw-output)
           
           ;; Extract the actual result
           (jupyter-console-extract-output raw-output code))))))
 
 (defun jupyter-console-extract-output (raw-output code)
   "Extract clean output from RAW-OUTPUT, removing CODE echo and prompts."
-  (jupyter-console-log 'debug "Extracting output from:\n%s" raw-output)
+  ;; (jupyter-console-log 'debug "Extracting output from:\n%s" raw-output)
   (let ((output raw-output))
     ;; Remove the echoed command
     (setq output (replace-regexp-in-string 
@@ -217,7 +219,7 @@ Optionally associate with FILE."
     ;; Trim whitespace
     (setq output (string-trim output))
     
-    (jupyter-console-log 'debug "After cleaning: '%s'" output)
+    ;; (jupyter-console-log 'debug "After cleaning: '%s'" output)
     
     ;; If we have any output after cleaning, return it
     (if (and output (not (string-empty-p output)))
@@ -239,35 +241,35 @@ Optionally associate with FILE."
          (t output))
       ;; Return nil for empty output, but log it
       (progn
-        (jupyter-console-log 'warn "No output extracted from execution")
+        ;; (jupyter-console-log 'warn "No output extracted from execution")
         nil))))
 
 ;; Define org-babel execution functions directly
 (defun org-babel-execute:python (body params)
   "Execute Python BODY with PARAMS using jupyter console."
-  (jupyter-console-log 'info "Executing Python code block")
+  ;; (jupyter-console-log 'info "Executing Python code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "python3" file))
          (result (jupyter-console-send-string buffer body)))
-    (jupyter-console-log 'info "Python execution completed: %s" result)
+    ;; (jupyter-console-log 'info "Python execution completed: %s" result)
     result))
 
 (defun org-babel-execute:R (body params)
   "Execute R BODY with PARAMS using jupyter console."
-  (jupyter-console-log 'info "Executing R code block")
+  ;; (jupyter-console-log 'info "Executing R code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "ir" file))
          (result (jupyter-console-send-string buffer body)))
-    (jupyter-console-log 'info "R execution completed: %s" result)
+    ;; (jupyter-console-log 'info "R execution completed: %s" result)
     result))
 
 (defun org-babel-execute:stata (body params)
   "Execute Stata BODY with PARAMS using jupyter console."
-  (jupyter-console-log 'info "Executing Stata code block")
+  ;; (jupyter-console-log 'info "Executing Stata code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "stata" file))
          (result (jupyter-console-send-string buffer body)))
-    (jupyter-console-log 'info "Stata execution completed: %s" result)
+    ;; (jupyter-console-log 'info "Stata execution completed: %s" result)
     result))
 
 ;;; Window management
@@ -339,30 +341,67 @@ If SHOW-BUFFER is non-nil, display the console buffer."
                    (and (boundp 'org-src-source-file-name)
                         org-src-source-file-name)
                    (buffer-file-name)))
-         (buffer (jupyter-console-get-or-create kernel file)))
-    (jupyter-console-log 'debug "Sending region [%d-%d] to %s kernel: '%s'" beg end kernel trimmed-code)
+         (buffer (if (string= kernel "sas-console")
+                     ;; Use SAS console system for sas-console kernel
+                     (when (fboundp 'sas-console-get-or-create)
+                       (if (bound-and-true-p org-src-mode)
+                           ;; In org-src-mode, get session and use source file
+                           (let* ((source-file (or (and (boundp 'org-src-source-file-name)
+                                                        org-src-source-file-name)
+                                                   file))
+                                  (session (or (when (fboundp 'sas-console-get-org-src-session)
+                                                 (sas-console-get-org-src-session))
+                                               ;; Fallback: scan source file directly
+                                               (when source-file
+                                                 (with-current-buffer (find-file-noselect source-file)
+                                                   (save-excursion
+                                                     (goto-char (point-min))
+                                                     (when (re-search-forward "^\\s-*#\\+begin_src\\s-+sas\\b.*:session\\s-+\\([^[:space:]]+\\)" nil t)
+                                                       (match-string 1))))))))
+                             ;; Debug logging for C-RET workflow
+                             (when (fboundp 'wrds-debug-log)
+                               (wrds-debug-log 'info "C-RET SAS workflow: session=%s, source-file=%s" session source-file))
+                             (sas-console-get-or-create session source-file))
+                         ;; Not in org-src-mode, use file directly
+                         (sas-console-get-or-create nil file)))
+                   ;; Use standard jupyter console for other kernels
+                   (jupyter-console-get-or-create kernel file))))
+    ;; (jupyter-console-log 'debug "Sending region [%d-%d] to %s kernel: '%s'" beg end kernel trimmed-code)
     ;; Don't send empty code
     (when (and trimmed-code (not (string-empty-p trimmed-code)))
       (when show-buffer
         (jupyter-console-display-buffer buffer))
-      (jupyter-console-send-string buffer trimmed-code))
+      (if (string= kernel "sas-console")
+          ;; Use SAS console send function
+          (when (fboundp 'sas-console-send-string)
+            (sas-console-send-string buffer trimmed-code))
+        ;; Use standard jupyter console send function
+        (jupyter-console-send-string buffer trimmed-code)))
     ;; Return result even if empty to avoid errors
     trimmed-code))
 
 (defun jupyter-console-detect-kernel ()
   "Detect the appropriate kernel based on the current major mode."
   (cond
-   ((derived-mode-p 'python-mode 'python-ts-mode) "python3")
-   ((derived-mode-p 'ess-r-mode 'ess-mode) "ir")
-   ((derived-mode-p 'stata-mode) "stata")
-   ;; For org-src-mode, check the language
+   ;; For org-src-mode, check the language first (takes priority)
    ((and (bound-and-true-p org-src-mode)
          (boundp 'org-src--babel-type))
     (pcase org-src--babel-type
       ((or "python" "jupyter-python") "python3")
       ((or "R" "jupyter-R") "ir")
       ((or "stata" "jupyter-stata") "stata")
+      ((or "sas" "jupyter-sas") "sas-console")
       (_ (error "Unknown language: %s" org-src--babel-type))))
+   ;; Check for SAS before general ESS mode
+   ((and (derived-mode-p 'ess-mode)
+         (boundp 'ess-dialect)
+         (string= ess-dialect "SAS")) "sas-console")
+   ((derived-mode-p 'SAS-mode 'ess-sas-mode) "sas-console")
+   ;; Python modes
+   ((derived-mode-p 'python-mode 'python-ts-mode) "python3")
+   ;; R and other ESS modes
+   ((derived-mode-p 'ess-r-mode 'ess-mode) "ir")
+   ((derived-mode-p 'stata-mode) "stata")
    (t (error "Cannot detect kernel for mode: %s" major-mode))))
 
 (defun jupyter-console-next-code-line ()
@@ -485,6 +524,27 @@ After evaluation, step to the next code line."
       (evil-define-key 'insert ess-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
       (evil-define-key 'visual ess-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step))))
 
+(defun jupyter-console-setup-sas-keybindings ()
+  "Set up C-RET keybinding for SAS/ESS mode."
+  ;; ESS SAS mode
+  (when (boundp 'ess-sas-mode-map)
+    (define-key ess-sas-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+    ;; Evil mode support
+    (with-eval-after-load 'evil
+      (when (fboundp 'evil-define-key)
+        (evil-define-key 'normal ess-sas-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+        (evil-define-key 'insert ess-sas-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+        (evil-define-key 'visual ess-sas-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step))))
+  ;; Also handle SAS-mode (non-ESS)
+  (when (boundp 'SAS-mode-map)
+    (define-key SAS-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+    ;; Evil mode support
+    (with-eval-after-load 'evil
+      (when (fboundp 'evil-define-key)
+        (evil-define-key 'normal SAS-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+        (evil-define-key 'insert SAS-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+        (evil-define-key 'visual SAS-mode-map (kbd "C-<return>") #'jupyter-console-r-eval-and-step)))))
+
 (defun jupyter-console-setup-stata-keybindings ()
   "Set up C-RET keybinding for Stata mode."
   ;; Stata mode may not have an explicit keymap, so we use a hook
@@ -509,36 +569,37 @@ After evaluation, step to the next code line."
   (when (and (bound-and-true-p org-src-mode)
              (boundp 'org-src--babel-type))
     ;; Set up window restoration on exit
-    (add-hook 'org-src-mode-hook
-              (lambda ()
-                (add-hook 'kill-buffer-hook #'jupyter-console-org-src-restore-windows nil t))
-              nil t)
+    (add-hook 'kill-buffer-hook #'jupyter-console-org-src-restore-windows nil t)
     (let ((lang org-src--babel-type))
       (cond
        ((member lang '("python" "jupyter-python"))
         (local-set-key (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
         ;; Evil mode support in org-src buffers
-        (with-eval-after-load 'evil
-          (when (fboundp 'evil-local-set-key)
-            (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
-            (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
-            (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-python-eval-and-step))))
+        (when (and (boundp 'evil-mode) evil-mode (fboundp 'evil-local-set-key))
+          (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+          (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-python-eval-and-step)
+          (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-python-eval-and-step)))
        ((member lang '("R" "jupyter-R"))
         (local-set-key (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
         ;; Evil mode support in org-src buffers
-        (with-eval-after-load 'evil
-          (when (fboundp 'evil-local-set-key)
-            (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
-            (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
-            (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-r-eval-and-step))))
+        (when (and (boundp 'evil-mode) evil-mode (fboundp 'evil-local-set-key))
+          (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+          (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+          (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-r-eval-and-step)))
        ((member lang '("stata" "jupyter-stata"))
         (local-set-key (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
         ;; Evil mode support in org-src buffers
-        (with-eval-after-load 'evil
-          (when (fboundp 'evil-local-set-key)
-            (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
-            (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
-            (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-stata-eval-and-step))))))))
+        (when (and (boundp 'evil-mode) evil-mode (fboundp 'evil-local-set-key))
+          (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+          (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)
+          (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-stata-eval-and-step)))
+       ((member lang '("sas" "jupyter-sas"))
+        (local-set-key (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+        ;; Evil mode support in org-src buffers
+        (when (and (boundp 'evil-mode) evil-mode (fboundp 'evil-local-set-key))
+          (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+          (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-console-r-eval-and-step)
+          (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-console-r-eval-and-step)))))))
 
 ;;; Mode hooks setup
 
@@ -558,18 +619,23 @@ After evaluation, step to the next code line."
   (with-eval-after-load 'ob-stata
     (jupyter-console-setup-stata-keybindings))
   
+  ;; SAS mode - load immediately and also after ESS loads
+  (jupyter-console-setup-sas-keybindings)
+  (with-eval-after-load 'ess
+    (jupyter-console-setup-sas-keybindings))
+  
   ;; Org-src-mode hook
   (add-hook 'org-src-mode-hook #'jupyter-console-setup-org-src-keybindings))
 
 ;; Initialize log
-(jupyter-console-clear-log)
-(jupyter-console-log 'info "Jupyter console module loaded")
-(jupyter-console-log 'info "Emacs version: %s" emacs-version)
-(jupyter-console-log 'info "Running in batch mode: %s" (if noninteractive "yes" "no"))
+;; (jupyter-console-clear-log)
+;; (jupyter-console-log 'info "Jupyter console module loaded")
+;; (jupyter-console-log 'info "Emacs version: %s" emacs-version)
+;; (jupyter-console-log 'info "Running in batch mode: %s" (if noninteractive "yes" "no"))
 
 ;; Set up keybindings
 (jupyter-console-setup-keybindings)
-(jupyter-console-log 'info "Keybindings configured for C-RET in Python, R, and Stata modes")
+;; (jupyter-console-log 'info "Keybindings configured for C-RET in Python, R, and Stata modes")
 
 (provide 'jupyter-console)
 ;;; jupyter-console.el ends here

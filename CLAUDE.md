@@ -123,3 +123,85 @@ find ~/.emacs.d/.local -name "*zmq*.elc" 2>/dev/null
 - **Stata**: `jupyter-stata` source blocks with `nbstata` kernel
 
 All use websocket/HTTP communication instead of ZMQ sockets.
+
+## Emacs Configuration Protocol (CRITICAL)
+
+When configuring Emacs/Doom, follow this **mandatory workflow** in order:
+
+### 1. ⚠️ ALWAYS Check for Lisp Errors
+```bash
+# Check ALL modified files for syntax errors
+cd ~/.doom.d
+emacs --batch --eval "(progn
+  (dolist (file '(\"config.el\" \"other-file.el\"))
+    (condition-case err
+        (progn (check-parens) (message \"✓ %s: syntax OK\" file))
+      (error (message \"✗ %s: %s\" file err)))))"
+```
+**Never skip this step** - syntax errors will break the entire Doom config.
+
+### 2. ⚠️ ALWAYS Test Lisp Commands
+```bash
+# Test individual modules load correctly
+emacs --batch --eval "(progn
+  (add-to-list 'load-path \"~/.doom.d/\")
+  (require 'your-module)
+  (message \"✓ Module loaded successfully\"))"
+```
+
+### 3. ⚠️ ALWAYS Test with Full Doom Config
+- **Cannot use batch mode** for full Doom testing (macros like `after!`, `map!` not available)
+- Create test functions in live Emacs session
+- Test actual user workflows (C-c C-c, keybindings, etc.)
+- Verify advice installation and function overrides work correctly
+
+### 4. ⚠️ ALWAYS Implement File-Based Logging
+```elisp
+;; Add to all new Emacs modules
+(defvar module-debug-log-file (expand-file-name "module-debug.log" "~/"))
+
+(defun module-debug-log (level format-string &rest args)
+  "Log with timestamp to file."
+  (let ((message (apply #'format format-string args))
+        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+    (with-temp-buffer
+      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+      (append-to-file (point-min) (point-max) module-debug-log-file))))
+```
+
+### 5. ⚠️ ALWAYS Run Doom Sync Before Restart
+```bash
+# Run this automatically - never ask user to restart without syncing first
+cd ~/.emacs.d && ./bin/doom sync
+```
+**Then** tell user to restart Emacs.
+
+### 6. ⚠️ ALWAYS Run Tests Yourself First
+```bash
+# Test your fixes before asking user to test
+cd ~/.doom.d
+# Load and run your test functions
+emacs --batch -l test-file.el --eval "(test-function)"
+```
+**Never ask user to test without running tests yourself first**
+
+### 7. ⚠️ ALWAYS Create Commits After Confirmation
+- Only create commits when user confirms functionality is working
+- Include comprehensive test results in commit message
+- Document what was tested and verified
+
+### Common Emacs Configuration Pitfalls
+1. **Parentheses imbalance** - always use `check-parens`
+2. **Missing requires** - functions called before modules loaded
+3. **Advice not installing** - wrong load order with ESS/packages
+4. **Doom macros in batch mode** - use live Emacs for full testing
+5. **No logging** - debugging becomes impossible without file logs
+
+### Testing Checklist for Emacs Changes
+- [ ] All `.el` files pass `check-parens`
+- [ ] Individual modules load without errors
+- [ ] **Tests run by Claude first** - verify fixes work before asking user
+- [ ] Full functionality tested in live Emacs session
+- [ ] File-based logging implemented and working
+- [ ] `doom sync` completed successfully
+- [ ] User confirmed functionality before commit

@@ -1,0 +1,14 @@
+# Test files and documentation
+tests/
+
+# Debug logs
+wrds-debug.log
+sas-integration-test.log
+
+# Backup files
+*.backup
+*_test.el
+
+# Temporary files
+.#*
+*~
