@@ -466,7 +466,8 @@ Only prompts for permission if the .envrc file is genuinely new/blocked."
          (fset 'envrc--export-original (symbol-function 'envrc--export)))
        
        (advice-add 'envrc--export :override #'envrc--smart-export)
-       (message "✓ Smart envrc advice installed successfully"))))
+       ;; (message "✓ Smart envrc advice installed successfully")
+       ))))
 
 ;; Auto-approve directory-local variables for trusted projects
 ;; This prevents repeated prompts for .dir-locals.el files in your projects
@@ -501,7 +502,7 @@ Only prompts for permission if the .envrc file is genuinely new/blocked."
 
 ;; Install advice to override safe-local-variable-p
 (advice-add 'safe-local-variable-p :around #'my-safe-local-variable-advice)
-(message "✓ Directory-local variables auto-approval installed")
+;; (message "✓ Directory-local variables auto-approval installed")
 
 ;; Function to find jupyter in pixi environment - kept for jupyter-console.el
 (defun find-pixi-jupyter ()
