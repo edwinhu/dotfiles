@@ -466,6 +466,42 @@ Only prompts for permission if the .envrc file is genuinely new/blocked."
   
   (advice-add 'envrc--export :override #'envrc--smart-export))
 
+;; Auto-approve directory-local variables for trusted projects
+;; This prevents repeated prompts for .dir-locals.el files in your projects
+
+;; Mark common project directory variables as safe
+;; These are typically used in pixi/conda environments and are safe to auto-approve
+(setq safe-local-variable-values
+      (append safe-local-variable-values
+              '((jupyter-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
+                (python-shell-interpreter . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/python")
+                (R-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/R")
+                (eval . (progn
+                         (add-to-list 'exec-path "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin")
+                         (setenv "PATH" (concat "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin:" (getenv "PATH"))))))))
+
+;; Additionally, mark these variable types as generally safe for projects
+(setq safe-local-variable-values
+      (append safe-local-variable-values
+              '((jupyter-command . stringp)
+                (python-shell-interpreter . stringp) 
+                (R-command . stringp)
+                (julia-executable . stringp)
+                (conda-env . stringp)
+                (pixi-env . stringp))))
+
+;; Auto-approve for trusted directories
+(defun auto-approve-project-locals ()
+  "Auto-approve common local variables in ~/projects/ directory."
+  (when (and buffer-file-name
+             (string-prefix-p (expand-file-name "~/projects/") 
+                             (file-name-directory buffer-file-name)))
+    ;; This will prevent the prompt for any pixi/conda path variables
+    (setq enable-local-variables :all)))
+
+;; Enable the auto-approval for project directories
+(add-hook 'find-file-hook #'auto-approve-project-locals)
+
 ;; Function to find jupyter in pixi environment - kept for jupyter-console.el
 (defun find-pixi-jupyter ()
   "Find jupyter executable in current pixi environment."
