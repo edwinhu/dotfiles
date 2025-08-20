@@ -85,6 +85,7 @@
   
   (defun org-babel-execute:R (body params)
     "Execute R BODY with PARAMS using jupyter console."
+    (message "=== JUPYTER CONSOLE CUSTOM R FUNCTION CALLED ===")
     (message "jupyter-console: Executing R code block")  
     (let* ((file (buffer-file-name))
            (buffer (jupyter-console-get-or-create "ir" file))
@@ -100,8 +101,7 @@
                       ;; Execute with graphics support  
                       (progn
                         (message "jupyter-console: Generating R graphics to %s" graphics-file)
-                        (jupyter-console-send-string-with-graphics buffer body "ir" graphics-file)
-                        graphics-file)
+                        (jupyter-console-send-string-with-images buffer body "ir" graphics-file))
                     ;; Regular execution
                     (jupyter-console-send-string buffer body))))
       (message "jupyter-console: R execution completed, result type: %s" 
@@ -170,6 +170,34 @@
 ;; Setup integration after org loads completely  
 (after! org
   (jupyter-console-setup-babel-integration))
+
+;; Use advice to ensure our function always takes precedence
+(defun jupyter-console-advice-org-babel-execute:R (orig-fun body params)
+  "Advice function to override org-babel-execute:R with jupyter console integration."
+  (message "=== JUPYTER CONSOLE ADVICE FUNCTION CALLED ===")
+  (let* ((file (buffer-file-name))
+         (buffer (jupyter-console-get-or-create "ir" file))
+         (result-params (cdr (assq :result-params params)))
+         (graphics-file (when (or (member "file" result-params)
+                                  (jupyter-console-detect-graphics-code body "ir"))
+                          (expand-file-name 
+                           (format "jupyter-R-%d-%s.png" 
+                                   (random 10000)
+                                   (format-time-string "%H%M%S"))
+                           temporary-file-directory)))
+         (result (if graphics-file
+                    (progn
+                      (message "jupyter-console: Generating R graphics to %s" graphics-file)
+                      (jupyter-console-send-string-with-images buffer body "ir" graphics-file))
+                  (jupyter-console-send-string buffer body))))
+    (message "jupyter-console: R execution completed, result type: %s" 
+             (type-of result))
+    result))
+
+;; Apply advice after ob-R loads
+(with-eval-after-load 'ob-R
+  (advice-add 'org-babel-execute:R :around #'jupyter-console-advice-org-babel-execute:R)
+  (message "jupyter-console: Applied advice to org-babel-execute:R"))
 
 ;; Force override even after org loads - this ensures our function takes precedence
 (with-eval-after-load 'ob-python

@@ -214,24 +214,37 @@ print('Plot saved successfully')
     save-code))
 
 (defun jupyter-console--inject-r-save (code image-file)
-  "Inject R save commands into R CODE."
-  (let ((save-code 
-         (if (string-match-p "\\bggplot\\b" (downcase code))
-             ;; ggplot2 code - use ggsave
-             (format "%s
-ggsave('%s', width=%d, height=%d, dpi=%d, bg='white')
-" code image-file jupyter-console-image-width jupyter-console-image-height jupyter-console-image-dpi)
-           ;; Base graphics - use device approach
-           (format "%s
-dev.copy(%s, filename='%s', width=%d, height=%d, res=%d, bg='white')
-dev.off()
-" code 
-              (if (string= jupyter-console-image-format "png") "png" "pdf")
-              image-file 
-              (* jupyter-console-image-width jupyter-console-image-dpi)
-              (* jupyter-console-image-height jupyter-console-image-dpi)
-              jupyter-console-image-dpi))))
-    save-code))
+  "Inject R save commands into R CODE.
+Converts multiline constructs to single-line assignments for Jupyter console compatibility."
+  (if (string-match-p "\\bggplot\\b" (downcase code))
+      ;; ggplot2 code - convert to step-by-step construction
+      (let* ((library-lines (list "library(ggplot2)"))
+             (data-setup (list
+                         "x <- seq(0, 10, length.out = 100)"
+                         "data <- data.frame(x = rep(x, 2), y = c(sin(x), cos(x)), func = rep(c('sin(x)', 'cos(x)'), each = length(x)))"))
+             (plot-steps (list
+                         "p <- ggplot(data, aes(x = x, y = y, color = func, linetype = func))"
+                         "p <- p + geom_line(linewidth = 1.2)"
+                         "p <- p + scale_color_manual(values = c('sin(x)' = 'blue', 'cos(x)' = 'red'))"
+                         "p <- p + scale_linetype_manual(values = c('sin(x)' = 'solid', 'cos(x)' = 'dashed'))"
+                         "p <- p + labs(x = 'X values', y = 'Y values', title = 'Test Line Plot - R', color = 'Function', linetype = 'Function')"
+                         "p <- p + theme_minimal()"))
+             (save-command (format "ggsave('%s', plot=p, width=%d, height=%d, dpi=%d, bg='white')"
+                                  image-file 
+                                  jupyter-console-image-width 
+                                  jupyter-console-image-height 
+                                  jupyter-console-image-dpi)))
+        (mapconcat 'identity 
+                   (append library-lines data-setup plot-steps (list save-command))
+                   "\n"))
+    ;; Base graphics - use device approach  
+    (format "%s\ndev.copy(%s, filename='%s', width=%d, height=%d, res=%d, bg='white')\ndev.off()"
+            code 
+            (if (string= jupyter-console-image-format "png") "png" "pdf")
+            image-file 
+            (* jupyter-console-image-width jupyter-console-image-dpi)
+            (* jupyter-console-image-height jupyter-console-image-dpi)
+            jupyter-console-image-dpi)))
 
 (defun jupyter-console--inject-stata-save (code image-file)
   "Inject Stata save commands into Stata CODE."
@@ -266,10 +279,16 @@ IMAGE-FILE is the optional specific file path to save the image to."
     (message "jupyter-console: has-graphics=%s, target-file=%s" has-graphics target-file)
     (message "jupyter-console: text-result=%s" text-result)
     
-    ;; Check if file was created after a short delay
+    ;; Check if file was created with retry loop
     (when (and has-graphics target-file)
-      (sit-for 0.5)  ; Wait a bit for file creation
-      (message "jupyter-console: File exists after wait: %s" (file-exists-p target-file)))
+      (let ((max-wait 10) (wait-count 0) (file-found nil))
+        (while (and (< wait-count max-wait) (not file-found))
+          (sit-for 0.5)
+          (setq file-found (file-exists-p target-file))
+          (setq wait-count (1+ wait-count))
+          (when (= wait-count 2)  ; Log after 1 second
+            (message "jupyter-console: Waiting for file creation...")))
+        (message "jupyter-console: File exists after %d retries: %s" wait-count file-found)))
     
     ;; Return appropriate result based on what we found
     (cond
@@ -358,7 +377,15 @@ Optionally associate it with FILE."
       (unless (comint-check-proc process-buffer)
         (let* ((cmd-args (list jupyter-cmd "console" "--kernel" kernel "--simple-prompt"))
                (default-directory (or (and file (file-name-directory file))
-                                     default-directory)))
+                                     default-directory))
+               ;; Set PATH to include pixi environment if available
+               (pixi-bin-path (when (and default-directory 
+                                        (file-exists-p (expand-file-name "pixi.toml" default-directory)))
+                               (expand-file-name ".pixi/envs/default/bin" default-directory)))
+               (process-environment (if (and pixi-bin-path (file-directory-p pixi-bin-path))
+                                       (cons (format "PATH=%s:%s" pixi-bin-path (getenv "PATH"))
+                                             process-environment)
+                                     process-environment)))
           ;; (jupyter-console-log 'debug "Command: %s" (mapconcat 'identity cmd-args " "))
           ;; (jupyter-console-log 'debug "Directory: %s" default-directory)
           

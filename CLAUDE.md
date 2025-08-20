@@ -201,7 +201,127 @@ emacs --batch -l test-file.el --eval "(test-function)"
 - [ ] All `.el` files pass `check-parens`
 - [ ] Individual modules load without errors
 - [ ] **Tests run by Claude first** - verify fixes work before asking user
-- [ ] Full functionality tested in live Emacs session
+- [ ] **CRITICAL: Test with full Doom environment** - not just batch mode
+- [ ] Full functionality tested in live Emacs session with real UI
 - [ ] File-based logging implemented and working
 - [ ] `doom sync` completed successfully
 - [ ] User confirmed functionality before commit
+
+## Org-Babel Jupyter Integration Testing (CRITICAL)
+
+When testing or debugging org-babel execution with Jupyter kernels, follow this **mandatory testing protocol**:
+
+### 1. ⚠️ ALWAYS Test Org Files Directly
+```bash
+# Create test script to run org file execution
+cd /path/to/project
+emacs --batch --eval "(progn
+  (setq default-directory \"/path/to/project/\")
+  (add-to-list 'load-path \"~/.doom.d/\")
+  (require 'org)
+  (require 'ob-R)
+  (load-file \"~/.doom.d/jupyter-console.el\")
+  (setq org-confirm-babel-evaluate nil)
+  
+  (let ((org-buffer (find-file-noselect \"test-file.org\")))
+    (with-current-buffer org-buffer
+      (goto-char (point-min))
+      (if (search-forward \"#+begin_src R\" nil t)
+          (condition-case err
+              (let ((result (org-babel-execute-src-block)))
+                (message \"Result: %s\" result)
+                (if (and result (stringp result) (file-exists-p result))
+                    (message \"SUCCESS: Image created at %s\" result)
+                  (message \"FAILED: No valid image file\")))
+            (error (message \"ERROR: %s\" err)))
+        (message \"No R block found\")))))"
+```
+
+### 2. ⚠️ ALWAYS Test Kernel Startup
+```bash
+# Verify R kernel can start with proper PATH
+cd /path/to/project
+emacs --batch --eval "(progn
+  (setq default-directory \"/path/to/project/\")
+  (add-to-list 'load-path \"~/.doom.d/\")
+  (require 'jupyter-console)
+  
+  (let ((buffer (jupyter-console-get-or-create \"ir\" \"test\")))
+    (sleep-for 3)
+    (if (get-buffer-process buffer)
+        (message \"✓ R kernel running successfully\")
+      (message \"✗ R kernel failed to start\"))))"
+```
+
+### 3. ⚠️ ALWAYS Test Graphics Generation
+```bash
+# Test actual ggplot code execution with image creation
+cd /path/to/project
+emacs --batch --eval "(progn
+  (setq default-directory \"/path/to/project/\")
+  (add-to-list 'load-path \"~/.doom.d/\")
+  (require 'jupyter-console)
+  
+  (let* ((buffer (jupyter-console-get-or-create \"ir\" \"graphics-test\"))
+         (test-code \"library(ggplot2); p <- ggplot(mtcars, aes(x=mpg, y=hp)) + geom_point(); ggsave('/tmp/test.png', p)\"))
+    (sleep-for 2)
+    (jupyter-console-send-string buffer test-code)
+    (sleep-for 3)
+    (if (file-exists-p \"/tmp/test.png\")
+        (message \"✓ Graphics generation working\")
+      (message \"✗ Graphics generation failed\"))))"
+```
+
+### 4. ⚠️ ALWAYS Verify PATH Configuration
+```bash
+# Check that pixi R environment is accessible
+cd /path/to/project
+pixi run R --version  # Should show R version
+ls .pixi/envs/default/bin/R  # Should exist
+```
+
+### 5. ⚠️ ALWAYS Test Error Conditions
+- Test with invalid R code to verify error handling
+- Test with missing dependencies to verify error messages
+- Test kernel restart scenarios
+- Test with different file formats (PNG vs PDF)
+
+### Common Jupyter Integration Issues
+1. **R not found**: Check PATH configuration in `jupyter-console-start-process`
+2. **Multiline code breaks**: Verify single-line conversion in `jupyter-console--inject-r-save`
+3. **Image not created**: Check timing/retry logic in `jupyter-console-send-string-with-images`
+4. **Process disappears**: Verify `comint-check-proc` and process management
+5. **Graphics detection fails**: Check patterns in `jupyter-console--detect-r-graphics`
+
+### Testing Files Pattern
+Create these test files for comprehensive testing:
+- `test-simple.org`: Basic R execution without graphics
+- `test-graphics.org`: ggplot2 code with `:results file`
+- `test-multiline.org`: Complex multiline R constructs
+- `debug-kernel.el`: Kernel startup and communication tests
+- `debug-graphics.el`: Graphics generation pipeline tests
+
+### Integration Test Command
+```bash
+# Run this command to test full org-babel integration
+cd /path/to/project && emacs --batch --eval "(progn
+  (setq default-directory \"/path/to/project/\")
+  (add-to-list 'load-path \"~/.doom.d/\")
+  (require 'org) (require 'ob-R) (load-file \"~/.doom.d/jupyter-console.el\")
+  (setq org-confirm-babel-evaluate nil)
+  (message \"Testing org-babel execution...\")
+  (find-file \"your-test-file.org\")
+  (goto-char (point-min))
+  (search-forward \"#+begin_src R\")
+  (let ((result (org-babel-execute-src-block)))
+    (message \"Final result: %s\" result)))"
+```
+
+**Critical**: Always run this integration test after any changes to jupyter-console.el or config.el org-babel functions.
+
+### Testing Reality Check
+**ALWAYS test org-babel integrations with full Doom loaded**, not batch mode:
+- Batch mode tests may work but fail in real Doom due to load order conflicts
+- Function overrides may not take effect properly without full Doom initialization
+- Use `emacs --eval` with timers, or test manually in live Emacs session
+- Verify the actual function being called, not just that code runs
