@@ -8,6 +8,283 @@
                        (or (bound-and-true-p doom-user-dir)
                           (expand-file-name "~/.doom.d/"))))
 
+;; Define function to find pixi jupyter executable
+(defun find-pixi-jupyter ()
+  "Find the pixi jupyter executable in current project."
+  (let* ((pixi-envs-path (locate-dominating-file default-directory "pixi.toml"))
+         (pixi-jupyter (when pixi-envs-path
+                        (expand-file-name ".pixi/envs/default/bin/jupyter" pixi-envs-path))))
+    (when (and pixi-jupyter (file-executable-p pixi-jupyter))
+      pixi-jupyter)))
+
+;; Setup jupyter console org-babel integration with proper overrides
+(defun jupyter-console-setup-babel-integration ()
+  "Setup jupyter console org-babel integration with proper function overrides."
+  (message "jupyter-console: Setting up babel integration")
+  
+  ;; Force load babel languages if needed
+  (when (boundp 'org-babel-load-languages)
+    (org-babel-do-load-languages 'org-babel-load-languages
+                                 '((python . t) (R . t))))
+  
+  ;; Override the functions
+  (defun org-babel-execute:python (body params)
+    "Execute Python BODY with PARAMS using jupyter console."
+    (message "=== JUPYTER CONSOLE CUSTOM FUNCTION CALLED ===")
+    (message "jupyter-console: Executing Python code block")
+    (let* ((file (buffer-file-name))
+           (buffer (jupyter-console-get-or-create "python3" file))
+           (result-params (cdr (assq :result-params params)))
+           (has-graphics (jupyter-console-detect-graphics-code body "python3"))
+           (graphics-file (when (or (member "file" result-params) has-graphics)
+                            (expand-file-name 
+                             (format "jupyter-python-%d-%s.png" 
+                                     (random 10000)
+                                     (format-time-string "%H%M%S"))
+                             (or default-directory temporary-file-directory))))
+           (result (if graphics-file
+                      ;; Execute with graphics support using line-by-line approach
+                      (progn
+                        (message "jupyter-console: Generating graphics to %s" graphics-file)
+                        ;; Send matplotlib setup commands
+                        (jupyter-console-send-string buffer "import matplotlib")
+                        (jupyter-console-send-string buffer "matplotlib.use('Agg')")
+                        (jupyter-console-send-string buffer "import matplotlib.pyplot as plt")
+                        (jupyter-console-send-string buffer "plt.ioff()")
+                        
+                        ;; Send user code line by line
+                        (dolist (line (split-string body "\n"))
+                          (when (and line (not (string-match-p "^\\s-*$" line)))
+                            (jupyter-console-send-string buffer line)))
+                        
+                        ;; Send save command
+                        (let ((save-cmd (format "plt.savefig(r'%s', bbox_inches='tight', dpi=150, facecolor='white', edgecolor='none')" graphics-file)))
+                          (jupyter-console-send-string buffer save-cmd))
+                        
+                        ;; Wait for file creation and return path
+                        (let ((max-wait 8)
+                              (wait-count 0))
+                          (while (and (< wait-count max-wait)
+                                     (not (file-exists-p graphics-file)))
+                            (sleep-for 0.5)
+                            (setq wait-count (1+ wait-count)))
+                          (if (file-exists-p graphics-file)
+                              (progn
+                                (message "jupyter-console: Graphics file created successfully")
+                                graphics-file)
+                            (progn
+                              (message "jupyter-console: Graphics file not created, falling back to text")
+                              (jupyter-console-send-string buffer body)))))
+                    ;; Regular execution
+                    (jupyter-console-send-string buffer body))))
+      (message "jupyter-console: Python execution completed, result: %s" 
+               (if (stringp result) 
+                   (if (file-exists-p result) "image-file" "text-output")
+                 result))
+      result))
+  
+  (defun org-babel-execute:R (body params)
+    "Execute R BODY with PARAMS using jupyter console."
+    (message "jupyter-console: Executing R code block")  
+    (let* ((file (buffer-file-name))
+           (buffer (jupyter-console-get-or-create "ir" file))
+           (result-params (cdr (assq :result-params params)))
+           (graphics-file (when (or (member "file" result-params)
+                                    (jupyter-console-detect-graphics-code body "ir"))
+                            (expand-file-name 
+                             (format "jupyter-R-%d-%s.png" 
+                                     (random 10000)
+                                     (format-time-string "%H%M%S"))
+                             temporary-file-directory)))
+           (result (if graphics-file
+                      ;; Execute with graphics support  
+                      (progn
+                        (message "jupyter-console: Generating R graphics to %s" graphics-file)
+                        (jupyter-console-send-string-with-graphics buffer body "ir" graphics-file)
+                        graphics-file)
+                    ;; Regular execution
+                    (jupyter-console-send-string buffer body))))
+      (message "jupyter-console: R execution completed, result type: %s" 
+               (type-of result))
+      result))
+  
+  ;; Define test function for user to run
+  (defun jupyter-console-test ()
+    "Test if jupyter console integration is working."
+    (interactive)
+    (message "=== Testing Jupyter Console Integration ===")
+    (message "1. Python function defined: %s" (fboundp 'org-babel-execute:python))
+    (message "2. Graphics detection: %s" 
+             (jupyter-console-detect-graphics-code "plt.plot([1,2,3])" "python3"))
+    (message "3. Auto display enabled: %s" jupyter-console-auto-display-images)
+    (message "4. Org inline images: %s" org-startup-with-inline-images)
+    (let ((func-def (symbol-function 'org-babel-execute:python)))
+      (message "5. Function definition: %s" 
+               (cond 
+                ((and (listp func-def) (eq (car func-def) 'lambda))
+                 "Custom jupyter-console function")
+                ((functionp func-def)
+                 "Standard function")
+                (t "Unknown"))))
+    (message "6. Function source contains 'JUPYTER CONSOLE CUSTOM': %s"
+             (let ((func-def (symbol-function 'org-babel-execute:python)))
+               (and (listp func-def)
+                    (string-match-p "JUPYTER CONSOLE CUSTOM" (format "%s" func-def)))))
+    (message "=== Test files created: complete-test.org ===")
+    (message "Open complete-test.org and try C-c C-c on the code blocks!"))
+  
+  ;; Debug function to test Python execution directly
+  (defun jupyter-console-debug-python ()
+    "Debug Python execution directly."
+    (interactive)
+    (let ((test-code "import matplotlib.pyplot as plt; print('Testing matplotlib')")
+          (test-params '((:results . "output"))))
+      (message "=== DEBUGGING PYTHON EXECUTION ===")
+      (message "About to call org-babel-execute:python...")
+      (let ((result (org-babel-execute:python test-code test-params)))
+        (message "Result: %s" result))))
+  
+  ;; Add a debug wrapper to see what's actually being called
+  (defun jupyter-console-debug-wrapper (original-func body params)
+    "Debug wrapper to see what function is being called."
+    (message "=== JUPYTER CONSOLE DEBUG: Function called with graphics code ===")
+    (funcall original-func body params))
+  
+  ;; Enable automatic image display after babel execution
+  (add-hook 'org-babel-after-execute-hook
+            (lambda ()
+              (when (and (derived-mode-p 'org-mode)
+                         (not (string-match-p "^ \\*temp" (buffer-name))))
+                (message "jupyter-console: Auto-displaying inline images")
+                (org-display-inline-images))))
+  
+  ;; Enable inline images by default
+  (setq org-startup-with-inline-images t)
+  (setq org-image-actual-width nil)
+  
+  ;; Ensure images are properly linked in results
+  (setq org-babel-default-header-args:python '((:results . "file")))
+  
+  (message "jupyter-console: Babel integration setup complete"))
+
+;; Setup integration after org loads completely  
+(after! org
+  (jupyter-console-setup-babel-integration))
+
+;; Force override even after org loads - this ensures our function takes precedence
+(with-eval-after-load 'ob-python
+  (message "FORCING JUPYTER-CONSOLE OVERRIDE AFTER OB-PYTHON LOADS")
+  (jupyter-console-setup-babel-integration))
+
+;; Additional override hook
+(add-hook 'org-mode-hook 
+          (lambda ()
+            (when (and (boundp 'org-babel-load-languages)
+                       (assq 'python org-babel-load-languages))
+              (jupyter-console-setup-babel-integration))))
+
+;; Also set up immediately if org is already loaded (for interactive testing)
+(when (featurep 'org)
+  (jupyter-console-setup-babel-integration))
+
+;; Use eval-after-load to ensure it runs after all other org setups
+(eval-after-load 'org
+  '(jupyter-console-setup-babel-integration))
+
+;; Also hook into org-mode to ensure function is available
+(add-hook 'org-mode-hook 
+          (lambda ()
+            (when (not (get 'org-babel-execute:python 'jupyter-console-setup))
+              (jupyter-console-setup-babel-integration)
+              (put 'org-babel-execute:python 'jupyter-console-setup t))))
+
+;; Force override using advice as a backup method
+(defun +jupyter-console-force-setup ()
+  "Force setup of jupyter console integration."
+  (interactive)
+  (jupyter-console-setup-babel-integration)
+  (message "Jupyter console integration forcibly enabled"))
+
+;; Working advice function for jupyter-console Python execution
+(defun +jupyter-console-python-advice (body params)
+  "Advice function to use jupyter-console for Python execution."
+  (message "=== JUPYTER CONSOLE ADVICE CALLED ===")
+  (let* ((result-params (cdr (assq :result-params params)))
+         (has-file (member "file" result-params))
+         (has-graphics (jupyter-console-detect-graphics-code body "python3")))
+    
+    (message "DEBUG: result-params = %s" result-params)
+    (message "DEBUG: has-file = %s" has-file)
+    (message "DEBUG: has-graphics = %s" has-graphics)
+    (message "DEBUG: body = %s" body)
+    
+    (if (or has-file has-graphics)
+        (progn
+          (message "jupyter-console: Executing graphics path...")
+          (let* ((file (buffer-file-name))
+                 (buffer (jupyter-console-get-or-create "python3" file))
+                 (graphics-file (expand-file-name 
+                               (format "jupyter-python-%d-%s.png" 
+                                       (random 10000)
+                                       (format-time-string "%H%M%S"))
+                               (or default-directory temporary-file-directory))))
+            
+            (message "jupyter-console: Generating graphics to %s" graphics-file)
+            
+            ;; Execute with line-by-line approach (FIXED!)
+            ;; Send matplotlib setup commands
+            (jupyter-console-send-string buffer "import matplotlib")
+            (jupyter-console-send-string buffer "matplotlib.use('Agg')")
+            (jupyter-console-send-string buffer "import matplotlib.pyplot as plt")
+            (jupyter-console-send-string buffer "plt.ioff()")
+            
+            ;; Send user code line by line
+            (dolist (line (split-string body "\n"))
+              (when (and line (not (string-match-p "^\\s-*$" line)))
+                (jupyter-console-send-string buffer line)))
+            
+            ;; Send save command
+            (let ((save-cmd (format "plt.savefig(r'%s', bbox_inches='tight', dpi=150, facecolor='white', edgecolor='none')" graphics-file)))
+              (jupyter-console-send-string buffer save-cmd))
+            
+            ;; Wait for file creation
+            (let ((max-wait 10) (wait-count 0))
+              (while (and (< wait-count max-wait)
+                         (not (file-exists-p graphics-file)))
+                (sleep-for 0.5)
+                (setq wait-count (1+ wait-count)))
+              
+              (if (file-exists-p graphics-file)
+                  (progn
+                    (message "jupyter-console: Graphics file created successfully")
+                    graphics-file)
+                (progn
+                  (message "jupyter-console: Graphics file not created")
+                  nil)))))
+      (progn
+        (message "jupyter-console: Regular execution (no graphics)")
+        (let* ((file (buffer-file-name))
+               (buffer (jupyter-console-get-or-create "python3" file)))
+          (jupyter-console-send-string buffer body))))))
+
+;; Use defadvice instead of advice-add for better compatibility
+(defadvice org-babel-execute:python (around jupyter-console-override activate)
+  "Override Python execution to use jupyter-console with image support."
+  (let ((body (ad-get-arg 0))
+        (params (ad-get-arg 1)))
+    (message "=== DEFADVICE JUPYTER CONSOLE CALLED ===")
+    (setq ad-return-value (+jupyter-console-python-advice body params))))
+
+;; Also try with eval-after-load as backup
+(eval-after-load 'org
+  '(progn
+     (ad-activate 'org-babel-execute:python)
+     (message "Jupyter console defadvice activated for org-babel-execute:python")))
+
+;; Also add to doom hook as backup
+(add-hook 'doom-init-ui-hook #'+jupyter-console-force-setup t)
+
+
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
 (setq user-full-name "John Doe"
@@ -192,10 +469,11 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 
 ;; Claude Code
 (use-package claude-code-ide
-  :bind ("C-c C-'" . claude-code-ide-menu)
+  :bind (("C-c C-'" . claude-code-ide-menu)
+         ("C-<escape>" . claude-code-ide-send-escape))
   :config
   (claude-code-ide-emacs-tools-setup)
-  (setq claude-code-ide-window-width 120)
+  (setq claude-code-ide-window-width 140)
   (setq claude-code-ide-terminal-backend 'vterm))
 
 ;; Include SAS support
@@ -211,14 +489,7 @@ that should be monospace but are often hijacked by Apple Color Emoji."
    (R . t)
    (stata . t)))
 
-;; Use advice to ensure our functions are always called
-(defun +jupyter-console-python-advice (body params)
-  "Advice to use jupyter-console for Python."
-  (require 'jupyter-console)
-  (let* ((file (buffer-file-name))
-         (buffer (jupyter-console-get-or-create "python3" file))
-         (result (jupyter-console-send-string buffer body)))
-    result))
+;; NOTE: +jupyter-console-python-advice is defined earlier in the file with graphics support
 
 (defun +jupyter-console-stata-advice (body params)
   "Advice to use jupyter-console for Stata."
@@ -288,14 +559,14 @@ that should be monospace but are often hijacked by Apple Color Emoji."
            ;; Fall back to standard ob-sas for other errors
            (org-babel-execute:sas body params)))))))
 
-;; Add advice after org loads - and ensure it runs after ESS loads too
-(with-eval-after-load 'org
-  (with-eval-after-load 'ob
-    (require 'jupyter-console)
-    ;; Use advice-add with override to ensure our functions run
-    (advice-add 'org-babel-execute:python :override #'+jupyter-console-python-advice)
-    (advice-add 'org-babel-execute:stata :override #'+jupyter-console-stata-advice)
-    (advice-add 'org-babel-execute:R :override #'+jupyter-console-r-advice)))
+;; DISABLED: This conflicts with our jupyter-console image integration
+;; (with-eval-after-load 'org
+;;   (with-eval-after-load 'ob
+;;     (require 'jupyter-console)
+;;     ;; Use advice-add with override to ensure our functions run
+;;     (advice-add 'org-babel-execute:python :override #'+jupyter-console-python-advice)
+;;     (advice-add 'org-babel-execute:stata :override #'+jupyter-console-stata-advice)
+;;     (advice-add 'org-babel-execute:R :override #'+jupyter-console-r-advice)))
 
 ;; Install SAS advice after ESS loads to ensure we override ESS's version
 (with-eval-after-load 'ess
@@ -467,7 +738,7 @@ Only prompts for permission if the .envrc file is genuinely new/blocked."
        
        (advice-add 'envrc--export :override #'envrc--smart-export)
        ;; (message "✓ Smart envrc advice installed successfully")
-       ))))
+       )))
 
 ;; Auto-approve directory-local variables for trusted projects
 ;; This prevents repeated prompts for .dir-locals.el files in your projects

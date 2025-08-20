@@ -9,6 +9,7 @@
 (require 'comint)
 (require 'org)
 (require 'ob)
+(require 'cl-lib)
 
 (defgroup jupyter-console nil
   "Jupyter console integration for org-babel."
@@ -26,11 +27,51 @@
   :type 'string
   :group 'jupyter-console)
 
+(defcustom jupyter-console-auto-display-images t
+  "Automatically detect and display images from plotting code."
+  :type 'boolean
+  :group 'jupyter-console)
+
+(defcustom jupyter-console-image-directory
+  (or (bound-and-true-p org-babel-temporary-directory)
+      temporary-file-directory)
+  "Directory for generated image files."
+  :type 'directory
+  :group 'jupyter-console)
+
+(defcustom jupyter-console-image-format "png"
+  "Default format for auto-generated images."
+  :type '(choice (const "png")
+                 (const "pdf")
+                 (const "svg"))
+  :group 'jupyter-console)
+
+(defcustom jupyter-console-image-width 8
+  "Default width for generated images (in inches for R, figure size for Python)."
+  :type 'number
+  :group 'jupyter-console)
+
+(defcustom jupyter-console-image-height 6
+  "Default height for generated images (in inches for R, figure size for Python)."
+  :type 'number
+  :group 'jupyter-console)
+
+(defcustom jupyter-console-image-dpi 150
+  "Default DPI for generated images."
+  :type 'number
+  :group 'jupyter-console)
+
 (defvar jupyter-console-buffers (make-hash-table :test 'equal)
   "Hash table mapping (file . kernel) pairs to their associated jupyter console buffers.")
 
 (defvar jupyter-console-first-run (make-hash-table :test 'equal)
   "Track if this is the first command sent to a buffer.")
+
+(defvar jupyter-console-generated-images nil
+  "List of image files generated in the current session for cleanup.")
+
+(defvar jupyter-console-image-counter 0
+  "Counter for generating unique image filenames.")
 
 ;; (defun jupyter-console-log (level format-string &rest args)
 ;;   "Log to jupyter console debug file.
@@ -49,6 +90,213 @@
 ;;   (when (file-exists-p jupyter-console-log-file)
 ;;     (delete-file jupyter-console-log-file))
 ;;   (jupyter-console-log 'info "=== Jupyter Console Log Started ==="))
+
+;;; Graphics and Image Detection Functions
+
+(defun jupyter-console-detect-graphics-code (code kernel)
+  "Detect if CODE contains plotting commands for the given KERNEL.
+Returns non-nil if graphics code is detected."
+  (when jupyter-console-auto-display-images
+    (let ((code-lower (downcase code)))
+      (pcase kernel
+        ("python3" (jupyter-console--detect-python-graphics code-lower))
+        ("ir" (jupyter-console--detect-r-graphics code-lower))
+        ("stata" (jupyter-console--detect-stata-graphics code-lower))
+        (_ nil)))))
+
+(defun jupyter-console--detect-python-graphics (code)
+  "Detect matplotlib/plotting code in Python CODE."
+  (or (string-match-p "\\bplt\\." code)
+      (string-match-p "\\bmatplotlib\\b" code)
+      (string-match-p "\\bplot(" code)
+      (string-match-p "\\bhistogram\\b" code)
+      (string-match-p "\\bscatter\\b" code)
+      (string-match-p "\\bbar(" code)
+      (string-match-p "\\bseaborn\\b" code)
+      (string-match-p "\\bsns\\." code)
+      (string-match-p "\\bplotly\\b" code)))
+
+(defun jupyter-console--detect-r-graphics (code)
+  "Detect ggplot2/base graphics code in R CODE."
+  (or (string-match-p "\\bggplot\\b" code)
+      (string-match-p "\\bplot(" code)
+      (string-match-p "\\bhist(" code)
+      (string-match-p "\\bbarplot\\b" code)
+      (string-match-p "\\bbox(" code)
+      (string-match-p "\\blines(" code)
+      (string-match-p "\\bpoints(" code)
+      (string-match-p "\\bgrid\\.arrange\\b" code)
+      (string-match-p "\\bggplot2\\b" code)))
+
+(defun jupyter-console--detect-stata-graphics (code)
+  "Detect graphics commands in Stata CODE."
+  (or (string-match-p "\\bgraph\\b" code)
+      (string-match-p "\\btwoway\\b" code)
+      (string-match-p "\\bhistogram\\b" code)
+      (string-match-p "\\bscatter\\b" code)
+      (string-match-p "\\bbar\\b" code)))
+
+;;; Image File Management Functions
+
+(defun jupyter-console-generate-image-filename (kernel)
+  "Generate a unique image filename for KERNEL."
+  (setq jupyter-console-image-counter (1+ jupyter-console-image-counter))
+  (let ((filename (format "jupyter-console-%s-%d-%s.%s"
+                         kernel
+                         jupyter-console-image-counter
+                         (format-time-string "%Y%m%d-%H%M%S")
+                         jupyter-console-image-format)))
+    (expand-file-name filename jupyter-console-image-directory)))
+
+(defun jupyter-console-track-generated-image (filepath)
+  "Add FILEPATH to the list of generated images for cleanup."
+  (push filepath jupyter-console-generated-images))
+
+(defun jupyter-console-cleanup-old-images (&optional keep-recent)
+  "Clean up old generated image files.
+If KEEP-RECENT is non-nil, keep the most recent images."
+  (interactive)
+  (let ((keep-count (or keep-recent 10)))
+    (when (> (length jupyter-console-generated-images) keep-count)
+      (let ((to-delete (nthcdr keep-count jupyter-console-generated-images)))
+        (dolist (file to-delete)
+          (when (and (file-exists-p file)
+                     (string-match-p "jupyter-console-" (file-name-nondirectory file)))
+            (delete-file file)))
+        (setq jupyter-console-generated-images
+              (cl-subseq jupyter-console-generated-images 0 keep-count))))))
+
+;;; Code Injection Functions
+
+(defun jupyter-console-inject-save-commands (code kernel)
+  "Inject image-saving commands into CODE for KERNEL.
+Returns modified code if graphics detected, original code otherwise."
+  (if (jupyter-console-detect-graphics-code code kernel)
+      (let ((image-file (jupyter-console-generate-image-filename kernel)))
+        (jupyter-console-track-generated-image image-file)
+        (pcase kernel
+          ("python3" (jupyter-console--inject-python-save code image-file))
+          ("ir" (jupyter-console--inject-r-save code image-file))
+          ("stata" (jupyter-console--inject-stata-save code image-file))
+          (_ code)))
+    code))
+
+(defun jupyter-console-inject-save-commands-to-file (code kernel target-file)
+  "Inject image-saving commands into CODE for KERNEL using specific TARGET-FILE.
+Returns modified code if graphics detected, original code otherwise."
+  (if (jupyter-console-detect-graphics-code code kernel)
+      (progn
+        (jupyter-console-track-generated-image target-file)
+        (pcase kernel
+          ("python3" (jupyter-console--inject-python-save code target-file))
+          ("ir" (jupyter-console--inject-r-save code target-file))
+          ("stata" (jupyter-console--inject-stata-save code target-file))
+          (_ code)))
+    code))
+
+(defun jupyter-console--inject-python-save (code image-file)
+  "Inject matplotlib save commands into Python CODE."
+  (let ((save-code (format "
+# Set up matplotlib for headless operation
+import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend
+import matplotlib.pyplot as plt
+plt.ioff()  # Turn off interactive mode
+
+# User code
+%s
+
+# Save plot to file
+print('Saving plot to: %s')
+plt.savefig(r'%s', bbox_inches='tight', dpi=%d, facecolor='white', edgecolor='none')
+print('Plot saved successfully')
+" code image-file image-file jupyter-console-image-dpi)))
+    save-code))
+
+(defun jupyter-console--inject-r-save (code image-file)
+  "Inject R save commands into R CODE."
+  (let ((save-code 
+         (if (string-match-p "\\bggplot\\b" (downcase code))
+             ;; ggplot2 code - use ggsave
+             (format "%s
+ggsave('%s', width=%d, height=%d, dpi=%d, bg='white')
+" code image-file jupyter-console-image-width jupyter-console-image-height jupyter-console-image-dpi)
+           ;; Base graphics - use device approach
+           (format "%s
+dev.copy(%s, filename='%s', width=%d, height=%d, res=%d, bg='white')
+dev.off()
+" code 
+              (if (string= jupyter-console-image-format "png") "png" "pdf")
+              image-file 
+              (* jupyter-console-image-width jupyter-console-image-dpi)
+              (* jupyter-console-image-height jupyter-console-image-dpi)
+              jupyter-console-image-dpi))))
+    save-code))
+
+(defun jupyter-console--inject-stata-save (code image-file)
+  "Inject Stata save commands into Stata CODE."
+  (format "%s
+graph export \"%s\", replace
+" code image-file))
+
+;;; Image Result Processing Functions
+
+(defun jupyter-console-check-for-generated-images ()
+  "Check if any images were recently generated and return the most recent one.
+Returns the file path if found, nil otherwise."
+  (when jupyter-console-generated-images
+    (let ((recent-image (car jupyter-console-generated-images)))
+      (when (and recent-image (file-exists-p recent-image))
+        recent-image))))
+
+(defun jupyter-console-send-string-with-images (buffer code kernel &optional image-file)
+  "Enhanced version of jupyter-console-send-string that handles image generation.
+BUFFER is the jupyter console buffer, CODE is the code to execute, 
+KERNEL is the kernel type (python3, ir, stata).
+IMAGE-FILE is the optional specific file path to save the image to."
+  (let* ((original-code code)
+         (has-graphics (jupyter-console-detect-graphics-code code kernel))
+         (target-file (or image-file 
+                         (when has-graphics (jupyter-console-generate-image-filename kernel))))
+         (modified-code (if has-graphics 
+                           (jupyter-console-inject-save-commands-to-file code kernel target-file)
+                         code))
+         (text-result (jupyter-console-send-string buffer modified-code)))
+    
+    (message "jupyter-console: has-graphics=%s, target-file=%s" has-graphics target-file)
+    (message "jupyter-console: text-result=%s" text-result)
+    
+    ;; Check if file was created after a short delay
+    (when (and has-graphics target-file)
+      (sit-for 0.5)  ; Wait a bit for file creation
+      (message "jupyter-console: File exists after wait: %s" (file-exists-p target-file)))
+    
+    ;; Return appropriate result based on what we found
+    (cond
+     ;; If we have a target file and graphics, return the file path regardless of existence for now
+     ((and has-graphics target-file)
+      (message "jupyter-console: Returning file path: %s" target-file)
+      target-file)
+     ;; Otherwise return text result
+     (t 
+      (message "jupyter-console: Returning text result")
+      text-result))))
+
+(defun jupyter-console-display-image-in-buffer (image-file buffer)
+  "Display IMAGE-FILE in BUFFER or in a popup window."
+  (when (and image-file (file-exists-p image-file))
+    (let ((image-buffer (get-buffer-create "*Jupyter Console Image*")))
+      (with-current-buffer image-buffer
+        (erase-buffer)
+        (insert-image (create-image image-file))
+        (goto-char (point-min))
+        (read-only-mode 1))
+      ;; Display in a popup window
+      (display-buffer image-buffer
+                      '((display-buffer-reuse-window
+                         display-buffer-pop-up-window)
+                        (window-height . 0.6)
+                        (window-width . 0.6))))))
 
 (defun jupyter-console-buffer-name (kernel file)
   "Generate buffer name for KERNEL associated with FILE."
@@ -188,8 +436,8 @@ Optionally associate with FILE."
         ;; Send the code
         (comint-send-string proc (concat code "\n"))
         
-        ;; Wait for output - R and Stata may need more time
-        (let ((wait-time (if (string-match-p "\\(ir\\|stata\\)" buffer-key) 5 3)))
+        ;; Wait for output - matplotlib may need more time than regular Python
+        (let ((wait-time (if (string-match-p "matplotlib\\|plt\\." code) 10 3)))
           (jupyter-console-wait-for-prompt buffer wait-time))
         
         ;; Get everything between our mark and the new prompt
@@ -247,11 +495,12 @@ Optionally associate with FILE."
 ;; Define org-babel execution functions directly
 (defun org-babel-execute:python (body params)
   "Execute Python BODY with PARAMS using jupyter console."
-  ;; (jupyter-console-log 'info "Executing Python code block")
+  (message "jupyter-console: Executing Python code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "python3" file))
-         (result (jupyter-console-send-string buffer body)))
-    ;; (jupyter-console-log 'info "Python execution completed: %s" result)
+         (result (jupyter-console-send-string-with-images buffer body "python3")))
+    (message "jupyter-console: Python execution completed, result type: %s, result: %s" 
+             (type-of result) result)
     result))
 
 (defun org-babel-execute:R (body params)
@@ -259,7 +508,7 @@ Optionally associate with FILE."
   ;; (jupyter-console-log 'info "Executing R code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "ir" file))
-         (result (jupyter-console-send-string buffer body)))
+         (result (jupyter-console-send-string-with-images buffer body "ir")))
     ;; (jupyter-console-log 'info "R execution completed: %s" result)
     result))
 
@@ -268,7 +517,7 @@ Optionally associate with FILE."
   ;; (jupyter-console-log 'info "Executing Stata code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "stata" file))
-         (result (jupyter-console-send-string buffer body)))
+         (result (jupyter-console-send-string-with-images buffer body "stata")))
     ;; (jupyter-console-log 'info "Stata execution completed: %s" result)
     result))
 
@@ -375,8 +624,12 @@ If SHOW-BUFFER is non-nil, display the console buffer."
           ;; Use SAS console send function
           (when (fboundp 'sas-console-send-string)
             (sas-console-send-string buffer trimmed-code))
-        ;; Use standard jupyter console send function
-        (jupyter-console-send-string buffer trimmed-code)))
+        ;; Use standard jupyter console send function with image support
+        (let ((result (jupyter-console-send-string-with-images buffer trimmed-code kernel)))
+          ;; If we got an image result in interactive mode, show it
+          (when (and show-buffer result (file-exists-p result))
+            (jupyter-console-display-image-in-buffer result buffer))
+          result)))
     ;; Return result even if empty to avoid errors
     trimmed-code))
 
