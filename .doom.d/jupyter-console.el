@@ -592,41 +592,70 @@ Optionally associate with FILE."
 ;; Define org-babel execution functions directly
 (defun org-babel-execute:python (body params)
   "Execute Python BODY with PARAMS using jupyter console."
-  (message "jupyter-console: Executing Python code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "python3" file))
          (results-type (cdr (assq :results params)))
-         (has-graphics (jupyter-console-detect-graphics-code body "python3"))
-         (result (if has-graphics
-                    ;; For graphics code, use non-interactive mode to get file path
-                    (jupyter-console-send-string-with-images buffer body "python3" nil nil)
-                  ;; For non-graphics code, use regular execution
-                  (jupyter-console-send-string buffer body))))
-    (message "jupyter-console: Python execution completed, result type: %s, result: %s" 
-             (type-of result) result)
-    ;; For :results file, always return the file path
-    (if (and has-graphics (string-match-p "file" (or results-type "")))
-        result
-      ;; For other results types, return text result
-      (if (and result (file-exists-p result)) nil result))))
+         (has-graphics (jupyter-console-detect-graphics-code body "python3")))
+    
+    (message "jupyter-console: Executing Python code block%s..." 
+             (if has-graphics " with image generation" ""))
+    
+    (let ((result (if has-graphics
+                     (progn
+                       (message "jupyter-console: Generating plot, this may take a moment...")
+                       ;; For graphics code, use non-interactive mode to get file path
+                       (jupyter-console-send-string-with-images buffer body "python3" nil nil))
+                   ;; For non-graphics code, use regular execution
+                   (jupyter-console-send-string buffer body))))
+      
+      (message "jupyter-console: Python execution completed%s" 
+               (if has-graphics " - plot saved" ""))
+      
+      ;; For :results file, always return the file path
+      (if (and has-graphics (string-match-p "file" (or results-type "")))
+          result
+        ;; For other results types, return text result
+        (if (and result (file-exists-p result)) nil result)))))
 
 (defun org-babel-execute:R (body params)
   "Execute R BODY with PARAMS using jupyter console."
-  ;; (jupyter-console-log 'info "Executing R code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "ir" file))
-         (result (jupyter-console-send-string-with-images buffer body "ir")))
-    ;; (jupyter-console-log 'info "R execution completed: %s" result)
-    result))
+         (has-graphics (jupyter-console-detect-graphics-code body "ir")))
+    
+    (message "jupyter-console: Executing R code block%s..." 
+             (if has-graphics " with image generation" ""))
+    
+    (let ((result (if has-graphics
+                     (progn
+                       (message "jupyter-console: Generating plot, this may take a moment...")
+                       (jupyter-console-send-string-with-images buffer body "ir"))
+                   (jupyter-console-send-string buffer body))))
+      
+      (message "jupyter-console: R execution completed%s" 
+               (if has-graphics " - plot saved" ""))
+      
+      result)))
 
 (defun org-babel-execute:stata (body params)
   "Execute Stata BODY with PARAMS using jupyter console."
-  ;; (jupyter-console-log 'info "Executing Stata code block")
   (let* ((file (buffer-file-name))
          (buffer (jupyter-console-get-or-create "stata" file))
-         (result (jupyter-console-send-string-with-images buffer body "stata")))
-    ;; (jupyter-console-log 'info "Stata execution completed: %s" result)
-    result))
+         (has-graphics (jupyter-console-detect-graphics-code body "stata")))
+    
+    (message "jupyter-console: Executing Stata code block%s..." 
+             (if has-graphics " with image generation" ""))
+    
+    (let ((result (if has-graphics
+                     (progn
+                       (message "jupyter-console: Generating plot, this may take a moment...")
+                       (jupyter-console-send-string-with-images buffer body "stata"))
+                   (jupyter-console-send-string buffer body))))
+      
+      (message "jupyter-console: Stata execution completed%s" 
+               (if has-graphics " - plot saved" ""))
+      
+      result)))
 
 ;;; Window management
 
