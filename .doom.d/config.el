@@ -402,10 +402,9 @@ or 'none if no .envrc exists."
              (string-match-p "No .envrc.*found" status-output))
         'none)
        
-       ;; .envrc is allowed and loaded (status will show RC allowed 1 or higher but not 2)
+       ;; .envrc is allowed (has allowPath, regardless of current loaded state)
        ((and status-output 
-             (string-match-p "Found RC allowed 1" status-output)
-             (not (string-match-p "No .envrc.*loaded" status-output)))
+             (string-match-p "Found RC allowPath" status-output))
         'allowed)
         
        ;; .envrc exists but is denied (Found RC allowed 2)
@@ -460,47 +459,49 @@ Only prompts for permission if the .envrc file is genuinely new/blocked."
          ;; No .envrc file
          (t 'none)))))
 
-  ;; Store original function and add advice
-  (unless (fboundp 'envrc--export-original)
-    (fset 'envrc--export-original (symbol-function 'envrc--export)))
-  
-  (advice-add 'envrc--export :override #'envrc--smart-export))
+  ;; Store original function and add advice - use eval-after-load to ensure envrc is ready
+  (eval-after-load 'envrc
+    '(progn
+       (unless (fboundp 'envrc--export-original)
+         (fset 'envrc--export-original (symbol-function 'envrc--export)))
+       
+       (advice-add 'envrc--export :override #'envrc--smart-export)
+       (message "✓ Smart envrc advice installed successfully"))))
 
 ;; Auto-approve directory-local variables for trusted projects
 ;; This prevents repeated prompts for .dir-locals.el files in your projects
 
-;; Mark common project directory variables as safe
-;; These are typically used in pixi/conda environments and are safe to auto-approve
-(setq safe-local-variable-values
-      (append safe-local-variable-values
-              '((jupyter-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
-                (python-shell-interpreter . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/python")
-                (R-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/R")
-                (eval . (progn
-                         (add-to-list 'exec-path "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin")
-                         (setenv "PATH" (concat "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin:" (getenv "PATH"))))))))
+;; Override the risky local variable function for trusted directories
+(defun my-safe-local-variable-advice (original-func sym val)
+  "Advice to make variables safe in trusted project directories."
+  (or
+   ;; Call original function first
+   (funcall original-func sym val)
+   
+   ;; If in trusted directory, approve common variables
+   (when (and buffer-file-name
+              (string-prefix-p (expand-file-name "~/projects/") 
+                              (file-name-directory buffer-file-name)))
+     (or
+      ;; Approve common data science tool variables
+      (memq sym '(jupyter-command python-shell-interpreter R-command 
+                  julia-executable conda-env pixi-env))
+      
+      ;; Approve eval forms that only modify exec-path and PATH
+      (and (eq sym 'eval)
+           (listp val)
+           (eq (car val) 'progn)
+           (cl-every (lambda (form)
+                      (and (listp form)
+                           (or (and (eq (car form) 'add-to-list)
+                                   (equal (cadr form) ''exec-path))
+                               (and (eq (car form) 'setenv)
+                                   (equal (cadr form) "PATH")))))
+                    (cdr val)))))))
 
-;; Additionally, mark these variable types as generally safe for projects
-(setq safe-local-variable-values
-      (append safe-local-variable-values
-              '((jupyter-command . stringp)
-                (python-shell-interpreter . stringp) 
-                (R-command . stringp)
-                (julia-executable . stringp)
-                (conda-env . stringp)
-                (pixi-env . stringp))))
-
-;; Auto-approve for trusted directories
-(defun auto-approve-project-locals ()
-  "Auto-approve common local variables in ~/projects/ directory."
-  (when (and buffer-file-name
-             (string-prefix-p (expand-file-name "~/projects/") 
-                             (file-name-directory buffer-file-name)))
-    ;; This will prevent the prompt for any pixi/conda path variables
-    (setq enable-local-variables :all)))
-
-;; Enable the auto-approval for project directories
-(add-hook 'find-file-hook #'auto-approve-project-locals)
+;; Install advice to override safe-local-variable-p
+(advice-add 'safe-local-variable-p :around #'my-safe-local-variable-advice)
+(message "✓ Directory-local variables auto-approval installed")
 
 ;; Function to find jupyter in pixi environment - kept for jupyter-console.el
 (defun find-pixi-jupyter ()
