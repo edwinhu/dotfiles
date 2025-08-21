@@ -9,16 +9,19 @@ This is a dotfiles repository for a macOS development environment. The configura
 ## Key Commands
 
 ### System Package Management
+
 - **Rebuild system configuration**: `cd ~/nix && nix run .#build-switch`
 - System packages are managed via **nix-darwin** - always make system-level changes through the nix configuration
 
 ### Development Tools
+
 - **Search files**: Use `rg` (ripgrep) instead of grep
 - **Find files**: Use `fd` instead of find
 - **GitHub operations**: Use `gh` CLI
 - **Directory navigation**: `cd` is aliased to `zoxide` for smart navigation
 
 ### Important Aliases
+
 - `yolo`: Claude AI with bypass permissions
 - `y`: Launch yazi file manager
 - `search`: Ripgrep excluding node_modules
@@ -27,6 +30,7 @@ This is a dotfiles repository for a macOS development environment. The configura
 ## Architecture & Structure
 
 ### Configuration Organization
+
 ```
 dotfiles/
 ├── .shell_common        # Core shell config (sourced by bash/zsh)
@@ -40,12 +44,14 @@ dotfiles/
 ```
 
 ### Key Design Patterns
+
 1. **Modular shell configuration**: Separate files for env, aliases, and common settings
 2. **No installation scripts**: Manual symlink approach for explicit control
 3. **XDG compliance**: Configurations in `.config/` directory
 4. **Consistent theming**: Catppuccin Mocha color scheme throughout
 
 ### Nix-Managed Configurations
+
 - **Sketchybar**: Fully managed by nix-darwin in `~/nix/modules/darwin/sketchybar/`
 - **Git**: Configuration managed by nix home-manager
 - **SSH**: Configuration managed by nix home-manager
@@ -56,79 +62,33 @@ dotfiles/
 ## Important Context
 
 ### Package Management
+
 - **Python/R projects**: Use `pixi` - always check `pixi.toml` before suggesting package installations
 - **System packages**: Use nix-darwin - never use homebrew or system package managers directly
 
 ### Terminal Configuration
+
 - **Leader key**: Ctrl+S in Ghostty
 - **Special keybinding**: Shift+Enter for newlines in Claude Code
 - Default editor: `nvim`
 
 ### Shell Environment
+
 - Sources nix-darwin profiles for package availability
 - Works with both bash and zsh
 - Custom PATH additions for user-specific directories remain in `.shell_env`
 
 ### Marimo Notebooks
+
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
-
-## Jupyter Integration (CRITICAL)
-
-### ZMQ Elimination Strategy
-Jupyter has been configured to work **WITHOUT ZMQ** to avoid persistent binary module conflicts. This is a hard requirement.
-
-**NEVER re-enable ZMQ** - it causes binary compatibility issues between nix and system packages.
-
-### Current Configuration
-1. **Nix packages**: ZMQ removed from `~/nix/modules/darwin/packages.nix`
-   - Line should be: `((emacsPackagesFor emacs-macport).emacsWithPackages (epkgs: [ epkgs.vterm ]))`
-   - NO `epkgs.zmq` in the list
-
-2. **Doom packages**: ZMQ disabled in `.doom.d/packages.el`
-   - `(package! zmq :disable t)` must remain
-
-3. **Config settings**: ZMQ forced off in `.doom.d/config.el`
-   - `jupyter-use-zmq nil` in the jupyter configuration
-   - Direct kernel startup using `jupyter kernel` command
-
-### Verification Commands
-**Quick check**: Run the verification script:
-```bash
-~/dotfiles/scripts/check-zmq-status.sh
-```
-
-**Manual checks** (if needed):
-```bash
-# Should return nil (not found)
-emacs --batch --eval "(message \"ZMQ: %s\" (locate-library \"zmq\"))"
-
-# Should show no ZMQ build directories
-ls ~/.emacs.d/.local/straight/build*/zmq* 2>/dev/null
-
-# Should show no ZMQ compiled files
-find ~/.emacs.d/.local -name "*zmq*.elc" 2>/dev/null
-```
-
-### If ZMQ Issues Return
-1. **Check nix config**: Ensure `epkgs.zmq` not in packages.nix
-2. **Rebuild nix**: `cd ~/nix && nix run .#build-switch`  
-3. **Remove compiled files**: `rm -rf ~/.emacs.d/.local/straight/build*/zmq/`
-4. **Remove jupyter compiled files**: `rm -f ~/.emacs.d/.local/straight/build*/jupyter/*.elc`
-5. **Restart Emacs completely**
-
-### Working Kernel Types
-- **Python**: `jupyter-python` source blocks with `python3` kernel
-- **R**: `jupyter-R` source blocks with `ir` kernel  
-- **Stata**: `jupyter-stata` source blocks with `nbstata` kernel
-
-All use websocket/HTTP communication instead of ZMQ sockets.
 
 ## Emacs Configuration Protocol (CRITICAL)
 
 When configuring Emacs/Doom, follow this **mandatory workflow** in order:
 
 ### 1. ⚠️ ALWAYS Check for Lisp Errors
+
 ```bash
 # Check ALL modified files for syntax errors
 cd ~/.doom.d
@@ -138,9 +98,11 @@ emacs --batch --eval "(progn
         (progn (check-parens) (message \"✓ %s: syntax OK\" file))
       (error (message \"✗ %s: %s\" file err)))))"
 ```
+
 **Never skip this step** - syntax errors will break the entire Doom config.
 
 ### 2. ⚠️ ALWAYS Test Lisp Commands
+
 ```bash
 # Test individual modules load correctly
 emacs --batch --eval "(progn
@@ -150,12 +112,14 @@ emacs --batch --eval "(progn
 ```
 
 ### 3. ⚠️ ALWAYS Test with Full Doom Config
+
 - **Cannot use batch mode** for full Doom testing (macros like `after!`, `map!` not available)
 - Create test functions in live Emacs session
 - Test actual user workflows (C-c C-c, keybindings, etc.)
 - Verify advice installation and function overrides work correctly
 
 ### 4. ⚠️ ALWAYS Implement File-Based Logging
+
 ```elisp
 ;; Add to all new Emacs modules
 (defvar module-debug-log-file (expand-file-name "module-debug.log" "~/"))
@@ -170,27 +134,49 @@ emacs --batch --eval "(progn
 ```
 
 ### 5. ⚠️ ALWAYS Run Doom Sync Before Restart
+
 ```bash
 # Run this automatically - never ask user to restart without syncing first
 cd ~/.emacs.d && ./bin/doom sync
 ```
+
 **Then** tell user to restart Emacs.
 
 ### 6. ⚠️ ALWAYS Run Tests Yourself First
+
+**For Basic Syntax/Loading Tests:**
 ```bash
-# Test your fixes before asking user to test
-cd ~/.doom.d
-# Load and run your test functions
-emacs --batch -l test-file.el --eval "(test-function)"
+# Test individual modules load correctly
+emacs --batch --eval "(progn
+  (add-to-list 'load-path \"~/.doom.d/\")
+  (require 'your-module)
+  (message \"✓ Module loaded successfully\"))"
 ```
-**Never ask user to test without running tests yourself first**
+
+**For Full Doom Environment Tests (REQUIRED):**
+```bash
+# Test with actual running Doom environment via emacsclient
+emacsclient --eval "(progn
+  (message \"Testing with full Doom environment...\")
+  (if (fboundp 'your-function)
+      (progn
+        (your-function)
+        (message \"✓ Function test completed\"))
+    (message \"✗ Function not available\")))"
+```
+
+**CRITICAL:** Batch mode tests do NOT accurately represent the full Doom environment. Always use `emacsclient` to test with the actual running configuration that users experience.
+
+**Never ask user to test without running emacsclient tests yourself first**
 
 ### 7. ⚠️ ALWAYS Create Commits After Confirmation
+
 - Only create commits when user confirms functionality is working
 - Include comprehensive test results in commit message
 - Document what was tested and verified
 
 ### Common Emacs Configuration Pitfalls
+
 1. **Parentheses imbalance** - always use `check-parens`
 2. **Missing requires** - functions called before modules loaded
 3. **Advice not installing** - wrong load order with ESS/packages
@@ -198,130 +184,54 @@ emacs --batch -l test-file.el --eval "(test-function)"
 5. **No logging** - debugging becomes impossible without file logs
 
 ### Testing Checklist for Emacs Changes
+
 - [ ] All `.el` files pass `check-parens`
-- [ ] Individual modules load without errors
-- [ ] **Tests run by Claude first** - verify fixes work before asking user
-- [ ] **CRITICAL: Test with full Doom environment** - not just batch mode
-- [ ] Full functionality tested in live Emacs session with real UI
+- [ ] Individual modules load without errors (batch mode OK)
+- [ ] **Tests run by Claude first via emacsclient** - verify fixes work before asking user
+- [ ] **CRITICAL: Test with full Doom environment via emacsclient** - not batch mode
+- [ ] Function availability confirmed via `emacsclient --eval`
+- [ ] Buffer creation/behavior tested via `emacsclient --eval`
 - [ ] File-based logging implemented and working
 - [ ] `doom sync` completed successfully
 - [ ] User confirmed functionality before commit
 
-## Org-Babel Jupyter Integration Testing (CRITICAL)
+### emacsclient Testing Examples
 
-When testing or debugging org-babel execution with Jupyter kernels, follow this **mandatory testing protocol**:
-
-### 1. ⚠️ ALWAYS Test Org Files Directly
 ```bash
-# Create test script to run org file execution
-cd /path/to/project
-emacs --batch --eval "(progn
-  (setq default-directory \"/path/to/project/\")
-  (add-to-list 'load-path \"~/.doom.d/\")
-  (require 'org)
-  (require 'ob-R)
-  (load-file \"~/.doom.d/jupyter-console.el\")
-  (setq org-confirm-babel-evaluate nil)
-  
-  (let ((org-buffer (find-file-noselect \"test-file.org\")))
-    (with-current-buffer org-buffer
-      (goto-char (point-min))
-      (if (search-forward \"#+begin_src R\" nil t)
-          (condition-case err
-              (let ((result (org-babel-execute-src-block)))
-                (message \"Result: %s\" result)
-                (if (and result (stringp result) (file-exists-p result))
-                    (message \"SUCCESS: Image created at %s\" result)
-                  (message \"FAILED: No valid image file\")))
-            (error (message \"ERROR: %s\" err)))
-        (message \"No R block found\")))))"
+# Test function availability
+emacsclient --eval "(message \"Function available: %s\" (fboundp 'your-function))"
+
+# Test function execution
+emacsclient --eval "(if (fboundp 'your-function) (your-function) (message \"Function not found\"))"
+
+# Check buffer creation
+emacsclient --eval "(message \"Buffers: %s\" (mapcar #'buffer-name (buffer-list)))"
+
+# Get Messages buffer content for debugging
+emacsclient --eval "(with-current-buffer \"*Messages*\" (buffer-substring-no-properties (max 1 (- (point-max) 1000)) (point-max)))"
 ```
 
-### 2. ⚠️ ALWAYS Test Kernel Startup
-```bash
-# Verify R kernel can start with proper PATH
-cd /path/to/project
-emacs --batch --eval "(progn
-  (setq default-directory \"/path/to/project/\")
-  (add-to-list 'load-path \"~/.doom.d/\")
-  (require 'jupyter-console)
-  
-  (let ((buffer (jupyter-console-get-or-create \"ir\" \"test\")))
-    (sleep-for 3)
-    (if (get-buffer-process buffer)
-        (message \"✓ R kernel running successfully\")
-      (message \"✗ R kernel failed to start\"))))"
+### Buffer Management for Testing
+
+When testing functions that create buffers (especially those with running processes), use these approaches for clean buffer killing:
+
+```elisp
+;; For buffers with running processes - bypasses confirmation prompts
+(let ((kill-buffer-query-functions nil))
+  (kill-buffer "*jupyter-python*"))
+
+;; Alternative function for unconditional killing
+(defun kill-this-buffer-unconditionally ()
+  "Kill the current buffer without prompting, even if modified."
+  (interactive)
+  (set-buffer-modified-p nil) ; Mark buffer as unmodified
+  (kill-this-buffer))
+
+;; Usage in tests
+(when (get-buffer "*test-buffer*") 
+  (with-current-buffer "*test-buffer*" 
+    (kill-this-buffer-unconditionally)))
 ```
 
-### 3. ⚠️ ALWAYS Test Graphics Generation
-```bash
-# Test actual ggplot code execution with image creation
-cd /path/to/project
-emacs --batch --eval "(progn
-  (setq default-directory \"/path/to/project/\")
-  (add-to-list 'load-path \"~/.doom.d/\")
-  (require 'jupyter-console)
-  
-  (let* ((buffer (jupyter-console-get-or-create \"ir\" \"graphics-test\"))
-         (test-code \"library(ggplot2); p <- ggplot(mtcars, aes(x=mpg, y=hp)) + geom_point(); ggsave('/tmp/test.png', p)\"))
-    (sleep-for 2)
-    (jupyter-console-send-string buffer test-code)
-    (sleep-for 3)
-    (if (file-exists-p \"/tmp/test.png\")
-        (message \"✓ Graphics generation working\")
-      (message \"✗ Graphics generation failed\"))))"
-```
+**Important**: Regular `kill-buffer` will prompt for confirmation when buffers have running processes (like termint/vterm sessions). Always use the `kill-buffer-query-functions nil` approach for automated testing.
 
-### 4. ⚠️ ALWAYS Verify PATH Configuration
-```bash
-# Check that pixi R environment is accessible
-cd /path/to/project
-pixi run R --version  # Should show R version
-ls .pixi/envs/default/bin/R  # Should exist
-```
-
-### 5. ⚠️ ALWAYS Test Error Conditions
-- Test with invalid R code to verify error handling
-- Test with missing dependencies to verify error messages
-- Test kernel restart scenarios
-- Test with different file formats (PNG vs PDF)
-
-### Common Jupyter Integration Issues
-1. **R not found**: Check PATH configuration in `jupyter-console-start-process`
-2. **Multiline code breaks**: Verify single-line conversion in `jupyter-console--inject-r-save`
-3. **Image not created**: Check timing/retry logic in `jupyter-console-send-string-with-images`
-4. **Process disappears**: Verify `comint-check-proc` and process management
-5. **Graphics detection fails**: Check patterns in `jupyter-console--detect-r-graphics`
-
-### Testing Files Pattern
-Create these test files for comprehensive testing:
-- `test-simple.org`: Basic R execution without graphics
-- `test-graphics.org`: ggplot2 code with `:results file`
-- `test-multiline.org`: Complex multiline R constructs
-- `debug-kernel.el`: Kernel startup and communication tests
-- `debug-graphics.el`: Graphics generation pipeline tests
-
-### Integration Test Command
-```bash
-# Run this command to test full org-babel integration
-cd /path/to/project && emacs --batch --eval "(progn
-  (setq default-directory \"/path/to/project/\")
-  (add-to-list 'load-path \"~/.doom.d/\")
-  (require 'org) (require 'ob-R) (load-file \"~/.doom.d/jupyter-console.el\")
-  (setq org-confirm-babel-evaluate nil)
-  (message \"Testing org-babel execution...\")
-  (find-file \"your-test-file.org\")
-  (goto-char (point-min))
-  (search-forward \"#+begin_src R\")
-  (let ((result (org-babel-execute-src-block)))
-    (message \"Final result: %s\" result)))"
-```
-
-**Critical**: Always run this integration test after any changes to jupyter-console.el or config.el org-babel functions.
-
-### Testing Reality Check
-**ALWAYS test org-babel integrations with full Doom loaded**, not batch mode:
-- Batch mode tests may work but fail in real Doom due to load order conflicts
-- Function overrides may not take effect properly without full Doom initialization
-- Use `emacs --eval` with timers, or test manually in live Emacs session
-- Verify the actual function being called, not just that code runs
