@@ -8,6 +8,11 @@
                        (or (bound-and-true-p doom-user-dir)
                           (expand-file-name "~/.doom.d/"))))
 
+;; Load termint-org-src module for C-RET functionality in org-src edit buffers
+(load (expand-file-name "termint-org-src-fixed.el" 
+                       (or (bound-and-true-p doom-user-dir)
+                          (expand-file-name "~/.doom.d/"))))
+
 ;; Define function to find pixi jupyter executable
 (defun find-pixi-jupyter ()
   "Find the pixi jupyter executable in current project."
@@ -257,7 +262,14 @@
 
 ;; Setup jupyter-termint integration
 (with-eval-after-load 'org
-  (message "Setting up jupyter-termint integration"))
+  (message "Setting up jupyter-termint integration")
+  (when (featurep 'jupyter-termint)
+    (jupyter-termint-setup)
+    (jupyter-termint-setup-babel-integration)
+    ;; Add debug info
+    (message "jupyter-termint functions available: %s"
+             (mapcar (lambda (f) (if (fboundp f) f (format "MISSING-%s" f)))
+                     '(termint-jupyter-python-start termint-jupyter-r-start termint-jupyter-stata-start)))))
 
 ;; Force override using advice as a backup method
 (defun +jupyter-console-force-setup ()
@@ -265,6 +277,352 @@
   (interactive)
   (jupyter-console-setup-babel-integration)
   (message "Jupyter console integration forcibly enabled"))
+
+;; Interactive debugging functions for jupyter-termint
+(defun +jupyter-termint-debug ()
+  "Debug jupyter-termint setup and function availability."
+  (interactive)
+  (message "=== JUPYTER-TERMINT DEBUG ===")
+  (message "jupyter-termint loaded: %s" (featurep 'jupyter-termint))
+  (message "termint loaded: %s" (featurep 'termint))
+  (message "termint-backend: %s" (if (boundp 'termint-backend) termint-backend "UNSET"))
+  (let ((funcs '(termint-jupyter-python-start termint-jupyter-r-start termint-jupyter-stata-start
+                termint-jupyter-python-send-string termint-jupyter-r-send-string termint-jupyter-stata-send-string)))
+    (dolist (func funcs)
+      (message "  %s: %s" func (if (fboundp func) "✓" "✗"))))
+  (message "Current jupyter buffers: %s" 
+           (seq-filter (lambda (name) (string-match-p "jupyter" name))
+                      (mapcar #'buffer-name (buffer-list))))
+  (message "=== END DEBUG ==="))
+
+(defun +jupyter-termint-force-setup ()
+  "Force setup of jupyter-termint integration."
+  (interactive)
+  (message "Forcing jupyter-termint setup...")
+  (require 'jupyter-termint)
+  (jupyter-termint-setup)
+  (jupyter-termint-setup-babel-integration)
+  (message "jupyter-termint setup complete!")
+  (+jupyter-termint-debug))
+
+(defun +jupyter-termint-detailed-debug ()
+  "Detailed debug of termint-jupyter setup and execution paths."
+  (interactive)
+  (message "=== DETAILED JUPYTER-TERMINT DEBUG ===")
+  
+  ;; Check jupyter executable paths
+  (let ((jupyter-paths (list
+                        (executable-find "jupyter")
+                        ".pixi/envs/default/bin/jupyter"
+                        "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")))
+    (message "Jupyter executable checks:")
+    (dolist (path jupyter-paths)
+      (if path
+          (message "  %s: %s (exists: %s)" 
+                   path 
+                   (if (file-executable-p path) "✓ executable" "✗ not executable")
+                   (file-exists-p path))
+        (message "  nil path"))))
+  
+  ;; Try to manually create a termint buffer
+  (message "\nTesting manual termint buffer creation...")
+  (condition-case err
+      (let* ((jupyter-path (or (executable-find "jupyter") 
+                              ".pixi/envs/default/bin/jupyter"))
+             (test-buffer-name "*test-termint-jupyter*"))
+        (message "Using jupyter path: %s" jupyter-path)
+        (if (and jupyter-path (file-executable-p jupyter-path))
+            (progn
+              (message "Calling termint-define for test...")
+              (termint-define "test-jupyter" jupyter-path
+                              :args '("console" "--kernel" "python3")
+                              :bracketed-paste-p t)
+              (sleep-for 1)
+              (if (fboundp 'termint-test-jupyter-start)
+                  (progn
+                    (message "✓ termint-test-jupyter-start function created")
+                    (message "Attempting to start test jupyter console...")
+                    (condition-case start-err
+                        (progn
+                          (call-interactively 'termint-test-jupyter-start)
+                          (sleep-for 2)
+                          (if (get-buffer "*test-jupyter*")
+                              (message "✓ Test buffer *test-jupyter* created successfully!")
+                            (message "✗ Test buffer *test-jupyter* was not created")))
+                      (error (message "✗ Error starting test jupyter: %s" start-err))))
+                (message "✗ termint-test-jupyter-start function not created")))
+          (message "✗ No valid jupyter executable found")))
+    (error (message "✗ Manual termint test failed: %s" err)))
+  
+  ;; Check existing buffer list for any termint-related buffers
+  (let ((all-buffers (mapcar #'buffer-name (buffer-list))))
+    (message "\nAll current buffers: %s" all-buffers)
+    (message "Termint-related buffers: %s" 
+             (seq-filter (lambda (name) 
+                          (or (string-match-p "jupyter" name)
+                              (string-match-p "termint" name)
+                              (string-match-p "vterm" name)))
+                        all-buffers)))
+  
+  (message "=== END DETAILED DEBUG ==="))
+
+(defun +jupyter-test-basic-termint ()
+  "Test basic termint functionality with a simple shell."
+  (interactive)
+  (message "Testing basic termint with shell...")
+  (condition-case err
+      (progn
+        (termint-define "test-shell" "bash" :bracketed-paste-p nil)
+        (sleep-for 1)
+        (if (fboundp 'termint-test-shell-start)
+            (progn
+              (message "✓ termint-test-shell-start function created")
+              (call-interactively 'termint-test-shell-start)
+              (sleep-for 2)
+              (if (get-buffer "*test-shell*")
+                  (message "✓ Basic termint test successful - *test-shell* buffer created")
+                (message "✗ Basic termint test failed - no *test-shell* buffer")))
+          (message "✗ termint-test-shell-start function not created")))
+    (error (message "✗ Basic termint test error: %s" err))))
+
+(defun +jupyter-test-termint-python-direct ()
+  "Test termint-jupyter-python-start directly and check what happens."
+  (interactive)
+  (message "=== TESTING termint-jupyter-python-start DIRECTLY ===")
+  (message "Before call - Current buffers: %s" 
+           (seq-filter (lambda (name) (string-match-p "jupyter\\|vterm\\|test" name))
+                      (mapcar #'buffer-name (buffer-list))))
+  
+  ;; Check if vterm is available
+  (message "vterm feature available: %s" (featurep 'vterm))
+  (message "vterm-mode function available: %s" (fboundp 'vterm))
+  (message "termint-backend: %s" termint-backend)
+  
+  ;; Check what termint definitions exist
+  (message "Checking termint definitions...")
+  (message "termint-jupyter-python-start available: %s" (fboundp 'termint-jupyter-python-start))
+  (message "termint-test-shell-start available: %s" (fboundp 'termint-test-shell-start))
+  
+  ;; Look for any vterm or jupyter-related buffers with different names
+  (let ((all-buffers (mapcar #'buffer-name (buffer-list))))
+    (message "All buffers: %s" all-buffers)
+    (message "Potential jupyter buffers: %s" 
+             (seq-filter (lambda (name) 
+                          (or (string-match-p "jupyter" name)
+                              (string-match-p "vterm" name)
+                              (string-match-p "python" name)
+                              (string-match-p "\\*.*\\*" name)))
+                        all-buffers)))
+  
+  (if (fboundp 'termint-jupyter-python-start)
+      (progn
+        (message "Calling termint-jupyter-python-start...")
+        (condition-case err
+            (progn
+              (termint-jupyter-python-start)
+              (sleep-for 3)
+              
+              ;; Check all new buffers
+              (let ((new-all-buffers (mapcar #'buffer-name (buffer-list))))
+                (message "After call - All buffers: %s" new-all-buffers)
+                (message "New potential jupyter buffers: %s" 
+                         (seq-filter (lambda (name) 
+                                      (or (string-match-p "jupyter" name)
+                                          (string-match-p "vterm" name)
+                                          (string-match-p "python" name)
+                                          (string-match-p "\\*.*\\*" name)))
+                                    new-all-buffers)))
+              
+              ;; Check various possible buffer names
+              (let ((possible-names '("*jupyter-python*" "*jupyter-python*<1>" "*vterm*" "*Python*")))
+                (dolist (name possible-names)
+                  (if (get-buffer name)
+                      (progn
+                        (message "✓ FOUND buffer: %s" name)
+                        (with-current-buffer name
+                          (message "  Buffer mode: %s" major-mode)
+                          (message "  Buffer has process: %s" 
+                                   (if (get-buffer-process (current-buffer)) "yes" "no"))
+                          (message "  Buffer contents preview: %s" 
+                                   (buffer-substring-no-properties 
+                                    (point-min) 
+                                    (min (point-max) (+ (point-min) 200))))))
+                    (message "✗ Buffer %s not found" name))))
+              
+              ;; Final check
+              (if (get-buffer "*jupyter-python*")
+                  (message "✓ SUCCESS: *jupyter-python* buffer created!")
+                (message "✗ FAILURE: *jupyter-python* buffer not found")))
+          (error (message "✗ ERROR calling termint-jupyter-python-start: %s" err))))
+    (message "✗ termint-jupyter-python-start function not available"))
+  
+  (message "=== END TEST ==="))
+
+(defun +jupyter-clean-and-retest ()
+  "Clean all termint buffers and retest jupyter setup."
+  (interactive)
+  (message "=== CLEANING AND RETESTING ===")
+  
+  ;; Kill any existing termint-related buffers
+  (let ((buffers-to-kill '("*test-shell*" "*jupyter-python*" "*jupyter-r*" "*jupyter-stata*" "*vterm*")))
+    (dolist (buffer-name buffers-to-kill)
+      (when (get-buffer buffer-name)
+        (kill-buffer buffer-name)
+        (message "Killed buffer: %s" buffer-name))))
+  
+  ;; Force fresh setup
+  (message "Running fresh jupyter-termint setup...")
+  (condition-case err
+      (progn
+        (jupyter-termint-setup)
+        (message "✓ Fresh setup completed"))
+    (error (message "✗ Setup failed: %s" err)))
+  
+  ;; Test basic debug info
+  (+jupyter-termint-debug)
+  
+  ;; Now test the python function
+  (message "\n=== TESTING AFTER CLEAN SETUP ===")
+  (if (fboundp 'termint-jupyter-python-start)
+      (progn
+        (message "Attempting termint-jupyter-python-start...")
+        (condition-case err
+            (progn
+              (termint-jupyter-python-start)
+              (sleep-for 2)
+              (let ((created-buffers (seq-filter 
+                                     (lambda (name) (string-match-p "jupyter\\|vterm\\|python" name))
+                                     (mapcar #'buffer-name (buffer-list)))))
+                (message "Created buffers: %s" created-buffers)
+                (if (get-buffer "*jupyter-python*")
+                    (message "✓ SUCCESS: *jupyter-python* buffer found!")
+                  (message "✗ Still no *jupyter-python* buffer"))))
+          (error (message "✗ Error in clean test: %s" err))))
+    (message "✗ Function still not available")))
+
+(defun +jupyter-debug-termint-command ()
+  "Debug the actual termint command that would be executed."
+  (interactive)
+  (message "=== DEBUGGING TERMINT COMMAND ===")
+  
+  ;; Check the jupyter path that would be used
+  (let ((jupyter-path (or (executable-find "jupyter")
+                          (when (file-executable-p ".pixi/envs/default/bin/jupyter")
+                            ".pixi/envs/default/bin/jupyter")
+                          (when (file-executable-p "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
+                            "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"))))
+    
+    (if jupyter-path
+        (progn
+          (message "✓ Jupyter path found: %s" jupyter-path)
+          (message "  Executable: %s" (file-executable-p jupyter-path))
+          (message "  Exists: %s" (file-exists-p jupyter-path))
+          
+          ;; Test the actual command that would be run
+          (message "\nTesting jupyter command manually...")
+          (let ((test-command (format "%s console --kernel python3 --help" jupyter-path)))
+            (message "Command to test: %s" test-command)
+            (condition-case err
+                (let ((output (shell-command-to-string test-command)))
+                  (message "Command output (first 200 chars): %s" 
+                           (substring output 0 (min 200 (length output)))))
+              (error (message "✗ Command failed: %s" err))))
+          
+          ;; Try creating a simple termint definition for comparison
+          (message "\nTrying simple termint definition...")
+          (condition-case err
+              (progn
+                (termint-define "test-jupyter-simple" jupyter-path
+                                :args '("console" "--kernel" "python3"))
+                (message "✓ Simple termint definition created")
+                (if (fboundp 'termint-test-jupyter-simple-start)
+                    (message "✓ Function termint-test-jupyter-simple-start exists")
+                  (message "✗ Function not created")))
+            (error (message "✗ Simple definition failed: %s" err))))
+      (message "✗ No jupyter path found"))))
+
+(defun +jupyter-test-simple-definition ()
+  "Test if we can create a working simple jupyter termint definition."
+  (interactive)
+  (message "=== TESTING SIMPLE JUPYTER DEFINITION ===")
+  
+  ;; Clear any existing test definitions
+  (when (get-buffer "*test-jupyter-simple*")
+    (kill-buffer "*test-jupyter-simple*"))
+  
+  (let ((jupyter-path "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"))
+    (if (and jupyter-path (file-executable-p jupyter-path))
+        (progn
+          (message "Using jupyter at: %s" jupyter-path)
+          
+          ;; Create simple definition like claude-code
+          (termint-define "test-jupyter-simple" 
+                          (format "%s console --kernel python3" jupyter-path))
+          
+          (sleep-for 1)
+          
+          (if (fboundp 'termint-test-jupyter-simple-start)
+              (progn
+                (message "✓ Simple function created, testing...")
+                (condition-case err
+                    (progn
+                      (call-interactively 'termint-test-jupyter-simple-start)
+                      (sleep-for 3)
+                      (if (get-buffer "*test-jupyter-simple*")
+                          (progn
+                            (message "✓ SUCCESS! Simple jupyter buffer created!")
+                            (with-current-buffer "*test-jupyter-simple*"
+                              (message "  Buffer mode: %s" major-mode)
+                              (message "  Has process: %s" 
+                                       (if (get-buffer-process (current-buffer)) "yes" "no"))))
+                        (message "✗ No buffer created")))
+                  (error (message "✗ Error calling function: %s" err))))
+            (message "✗ Function not created")))
+      (message "✗ Jupyter not found or not executable"))))
+
+(defun +jupyter-test-fixed-pattern ()
+  "Test the new jupyter termint pattern that mimics claude-code."
+  (interactive)
+  (message "=== TESTING FIXED JUPYTER PATTERN ===")
+  
+  ;; Force fresh setup with new pattern
+  (jupyter-termint-setup)
+  
+  ;; Test if the new kernel start functions exist
+  (let ((kernel-functions '(termint-jupyter-python-start-kernel
+                           termint-jupyter-r-start-kernel  
+                           termint-jupyter-stata-start-kernel)))
+    (message "Kernel wrapper functions:")
+    (dolist (func kernel-functions)
+      (message "  %s: %s" func (if (fboundp func) "✓" "✗"))))
+  
+  ;; Test the basic termint functions
+  (let ((base-functions '(termint-jupyter-python-start
+                         termint-jupyter-r-start
+                         termint-jupyter-stata-start)))
+    (message "Base termint functions:")
+    (dolist (func base-functions)
+      (message "  %s: %s" func (if (fboundp func) "✓" "✗"))))
+  
+  ;; Test Python kernel start
+  (message "\nTesting Python kernel start...")
+  (if (fboundp 'termint-jupyter-python-start-kernel)
+      (progn
+        (condition-case err
+            (progn
+              (call-interactively 'termint-jupyter-python-start-kernel)
+              (message "✓ Function called successfully")
+              (sleep-for 4) ; Give time for kernel to start
+              (if (get-buffer "*jupyter-python*")
+                  (progn
+                    (message "✓ SUCCESS: *jupyter-python* buffer created!")
+                    (with-current-buffer "*jupyter-python*"
+                      (message "  Buffer mode: %s" major-mode)
+                      (message "  Has process: %s" 
+                               (if (get-buffer-process (current-buffer)) "yes" "no"))))
+                (message "✗ Buffer not found")))
+          (error (message "✗ Error: %s" err))))
+    (message "✗ Kernel function not available")))
 
 ;; Working advice function for jupyter-console Python execution
 (defun +jupyter-console-python-advice (body params)
