@@ -3,8 +3,8 @@
 
 ;; CRITICAL: ZMQ completely eliminated - no jupyter package loaded
 
-;; Load jupyter-console module for org-babel integration
-(load (expand-file-name "jupyter-console.el" 
+;; Load jupyter-termint module for org-babel integration (replaces jupyter-console)
+(load (expand-file-name "jupyter-termint.el" 
                        (or (bound-and-true-p doom-user-dir)
                           (expand-file-name "~/.doom.d/"))))
 
@@ -239,20 +239,25 @@
                        (assq 'python org-babel-load-languages))
               (jupyter-console-setup-babel-integration))))
 
+;; NOTE: Old jupyter-console setup commented out - now using jupyter-termint
 ;; Also set up immediately if org is already loaded (for interactive testing)
-(when (featurep 'org)
-  (jupyter-console-setup-babel-integration))
+;; (when (featurep 'org)
+;;   (jupyter-console-setup-babel-integration))
 
 ;; Use eval-after-load to ensure it runs after all other org setups
-(eval-after-load 'org
-  '(jupyter-console-setup-babel-integration))
+;; (eval-after-load 'org
+;;   '(jupyter-console-setup-babel-integration))
 
 ;; Also hook into org-mode to ensure function is available
-(add-hook 'org-mode-hook 
-          (lambda ()
-            (when (not (get 'org-babel-execute:python 'jupyter-console-setup))
-              (jupyter-console-setup-babel-integration)
-              (put 'org-babel-execute:python 'jupyter-console-setup t))))
+;; (add-hook 'org-mode-hook 
+;;           (lambda ()
+;;             (when (not (get 'org-babel-execute:python 'jupyter-console-setup))
+;;               (jupyter-console-setup-babel-integration)
+;;               (put 'org-babel-execute:python 'jupyter-console-setup t))))
+
+;; Setup jupyter-termint integration
+(with-eval-after-load 'org
+  (message "Setting up jupyter-termint integration"))
 
 ;; Force override using advice as a backup method
 (defun +jupyter-console-force-setup ()
@@ -523,14 +528,223 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   ;; Set default scale for consistent sizing
   (setq nerd-icons-scale-factor 1.0))
 
-;; Claude Code
+;; Claude Code IDE - keep original menu but override functions with termint
 (use-package claude-code-ide
-  :bind (("C-c C-'" . claude-code-ide-menu)
-         ("C-<escape>" . claude-code-ide-send-escape))
+  :bind (("C-c C-'" . claude-code-ide-menu))
   :config
   (claude-code-ide-emacs-tools-setup)
   (setq claude-code-ide-window-width 140)
-  (setq claude-code-ide-terminal-backend 'vterm))
+  (setq claude-code-ide-terminal-backend 'vterm)
+  (setq claude-code-ide-vterm-anti-flicker t))
+
+;; Termint configuration for better REPL integration with vterm
+(use-package termint
+  :demand t
+  :config
+  ;; Use vterm as backend for proper terminal emulation
+  (setq termint-backend 'vterm)
+  
+  ;; Configure Claude Code with termint for better multi-line handling
+  (termint-define "claude-code" "claude" 
+    :bracketed-paste-p t
+    :send-delayed-final-ret t
+    :source-syntax "@{{file}}")
+  
+  ;; Define custom termint functions that use the auto-generated ones
+  (defun termint-claude-code-continue ()
+    "Continue most recent Claude Code conversation using termint."
+    (interactive)
+    (if-let ((buffer (get-buffer "*claude-code*")))
+        (switch-to-buffer buffer)
+      (progn
+        (termint-claude-code-start)
+        (run-with-timer 0.5 nil (lambda ()
+          (termint-claude-code-send-string "claude --continue"))))))
+    
+  (defun termint-claude-code-resume ()
+    "Resume Claude Code session from previous conversation using termint."
+    (interactive)
+    (if-let ((buffer (get-buffer "*claude-code*")))
+        (switch-to-buffer buffer)
+      (progn
+        (termint-claude-code-start)
+        (run-with-timer 0.5 nil (lambda ()
+          (termint-claude-code-send-string "claude --resume"))))))
+    
+  (defun termint-claude-code-quit ()
+    "Stop current Claude Code session."
+    (interactive)
+    (when-let ((buffer (get-buffer "*claude-code*")))
+      (kill-buffer buffer)))
+      
+  (defun termint-claude-code-list ()
+    "List all Claude Code sessions."
+    (interactive)
+    (message "Active Claude Code sessions: %s" 
+             (mapcar #'buffer-name 
+                     (seq-filter (lambda (b) 
+                                   (string-match-p "claude-code" (buffer-name b)))
+                                 (buffer-list)))))
+  
+  (defun termint-claude-code-switch-to-buffer ()
+    "Switch to Claude Code buffer."
+    (interactive)
+    (if-let ((buffer (get-buffer "*claude-code*")))
+        (switch-to-buffer buffer)
+      (termint-claude-code-start)))
+      
+  (defun termint-claude-code-toggle-window ()
+    "Toggle Claude Code window visibility."
+    (interactive)
+    (if-let ((window (get-buffer-window "*claude-code*")))
+        (delete-window window)
+      (termint-claude-code-switch-to-buffer)))
+      
+  (defun termint-claude-code-send-prompt ()
+    "Send prompt from minibuffer to Claude Code."
+    (interactive)
+    (let ((prompt (read-string "Claude Code prompt: ")))
+      (termint-claude-code-send-string prompt)))
+      
+  (defun termint-claude-code-insert-selection ()
+    "Insert current selection into Claude Code."
+    (interactive)
+    (if (use-region-p)
+        (let ((text (buffer-substring-no-properties (region-beginning) (region-end))))
+          (termint-claude-code-send-string text))
+      (message "No region selected")))
+      
+  (defun termint-claude-code-insert-newline ()
+    "Insert newline in Claude Code."
+    (interactive)
+    (termint-claude-code-send-string "\n"))
+      
+  (defun termint-claude-code-send-escape ()
+    "Send escape key to Claude Code."
+    (interactive)
+    (termint-claude-code-send-string "\e"))
+    
+  (defun termint-claude-code-yolo ()
+    "Start Claude Code with yolo (bypass permissions) using termint."
+    (interactive)
+    (if-let ((buffer (get-buffer "*claude-code*")))
+        (progn
+          (switch-to-buffer buffer)
+          (termint-claude-code-send-string "claude --dangerously-skip-permissions"))
+      (progn
+        (termint-claude-code-start)
+        (run-with-timer 0.5 nil (lambda ()
+          (termint-claude-code-send-string "claude --dangerously-skip-permissions"))))))
+          
+  (defun termint-claude-code-yolo-continue ()
+    "Continue Claude Code conversation with yolo permissions using termint."
+    (interactive)
+    (if-let ((buffer (get-buffer "*claude-code*")))
+        (progn
+          (switch-to-buffer buffer)
+          (termint-claude-code-send-string "claude --dangerously-skip-permissions --continue"))
+      (progn
+        (termint-claude-code-start)
+        (run-with-timer 0.5 nil (lambda ()
+          (termint-claude-code-send-string "claude --dangerously-skip-permissions --continue"))))))
+          
+  (defun termint-claude-code-yolo-resume ()
+    "Resume Claude Code session with yolo permissions using termint."
+    (interactive)
+    (if-let ((buffer (get-buffer "*claude-code*")))
+        (progn
+          (switch-to-buffer buffer)
+          (termint-claude-code-send-string "claude --dangerously-skip-permissions --resume"))
+      (progn
+        (termint-claude-code-start)
+        (run-with-timer 0.5 nil (lambda ()
+          (termint-claude-code-send-string "claude --dangerously-skip-permissions --resume"))))))
+        
+  (defun termint-claude-code-configuration ()
+    "Open Claude Code configuration."
+    (interactive)
+    (message "Claude Code configuration: Use termint settings"))
+    
+  (defun termint-claude-code-debugging ()
+    "Open Claude Code debugging."
+    (interactive)
+    (message "Claude Code debugging: Check *claude-code* buffer"))
+  
+  ;; Override claude-code-ide functions to use termint implementations
+  (with-eval-after-load 'claude-code-ide
+    ;; Create a wrapper function for starting since termint-claude-code-start is auto-generated
+    (defun claude-code-ide-start-session ()
+      "Start Claude Code session using termint."
+      (interactive)
+      (if (fboundp 'termint-claude-code-start)
+          (termint-claude-code-start)
+        (error "termint-claude-code-start function not available. Make sure termint is loaded properly.")))
+    
+    ;; Session Management  
+    (defalias 'claude-code-ide-continue-conversation 'termint-claude-code-continue)  
+    (defalias 'claude-code-ide-resume-session 'termint-claude-code-resume)
+    (defalias 'claude-code-ide-stop-session 'termint-claude-code-quit)
+    (defalias 'claude-code-ide-list-sessions 'termint-claude-code-list)
+    
+    ;; Navigation
+    (defalias 'claude-code-ide-switch-to-buffer 'termint-claude-code-switch-to-buffer)
+    (defalias 'claude-code-ide-toggle-window 'termint-claude-code-toggle-window)
+    
+    ;; Interaction
+    (defalias 'claude-code-ide-insert-selection 'termint-claude-code-insert-selection)
+    (defalias 'claude-code-ide-send-prompt 'termint-claude-code-send-prompt)
+    (defalias 'claude-code-ide-send-escape 'termint-claude-code-send-escape)
+    (defalias 'claude-code-ide-insert-newline 'termint-claude-code-insert-newline)
+    
+    ;; Special functions
+    (defalias 'claude-code-ide-yolo 'termint-claude-code-yolo)
+    (defalias 'claude-code-ide-yolo-continue 'termint-claude-code-yolo-continue)
+    (defalias 'claude-code-ide-yolo-resume 'termint-claude-code-yolo-resume)
+    
+    ;; Submenus  
+    (defalias 'claude-code-ide-configuration 'termint-claude-code-configuration)
+    (defalias 'claude-code-ide-debugging 'termint-claude-code-debugging)
+    
+    (message "claude-code-ide functions overridden with termint implementations"))
+  
+  ;; Add yolo submenu to claude-code-ide menu
+  (with-eval-after-load 'claude-code-ide
+    (require 'transient)
+    
+    ;; Define yolo submenu
+    (transient-define-prefix claude-code-ide-yolo-menu ()
+      "Claude Code IDE yolo (bypass permissions) menu."
+      ["Claude Code YOLO (Bypass Permissions)"
+       ["Session Management with --dangerously-skip-permissions"
+        ("s" "Start new session with yolo" termint-claude-code-yolo)
+        ("c" "Continue conversation with yolo" termint-claude-code-yolo-continue)
+        ("r" "Resume session with yolo" termint-claude-code-yolo-resume)]])
+    
+    ;; Override the main menu to include yolo submenu
+    (transient-define-prefix claude-code-ide-menu ()
+      "Claude Code IDE main menu."
+      [:description claude-code-ide--session-status]
+      ["Claude Code IDE"
+       ["Session Management"
+        ("s" claude-code-ide--start-if-no-session :description claude-code-ide--start-description)
+        ("c" claude-code-ide--continue-if-no-session :description claude-code-ide--continue-description)
+        ("r" claude-code-ide--resume-if-no-session :description claude-code-ide--resume-description)
+        ("q" "Stop current session" claude-code-ide-stop)
+        ("l" "List all sessions" claude-code-ide-list-sessions)]
+       ["Navigation"
+        ("b" "Switch to Claude buffer" claude-code-ide-switch-to-buffer)
+        ("w" "Toggle window visibility" claude-code-ide-toggle-window)]
+       ["Interaction"
+        ("i" "Insert selection" claude-code-ide-insert-at-mentioned)
+        ("p" "Send prompt from minibuffer" claude-code-ide-send-prompt)
+        ("e" "Send escape key" claude-code-ide-send-escape)
+        ("n" "Insert newline" claude-code-ide-insert-newline)]
+       ["Submenus"
+        ("Y" "YOLO (Bypass Permissions)" claude-code-ide-yolo-menu)
+        ("C" "Configuration" claude-code-ide-config-menu)
+        ("d" "Debugging" claude-code-ide-debug-menu)]]))
+  
+  (message "termint: Claude Code integration configured with vterm backend"))
 
 ;; Include SAS support
 (use-package! ob-sas

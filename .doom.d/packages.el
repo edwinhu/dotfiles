@@ -35,6 +35,10 @@
 ;; Direnv integration for pixi environments
 (package! envrc)
 
+;; Terminal-based REPL integration with vterm backend
+(package! termint
+  :recipe (:host github :repo "milanglacier/termint.el"))
+
 ;; To install a package directly from a particular repo, you'll need to specify
 ;; a `:recipe'. You'll find documentation on what `:recipe' accepts here:
 ;; https://github.com/raxod502/straight.el#the-recipe-format
