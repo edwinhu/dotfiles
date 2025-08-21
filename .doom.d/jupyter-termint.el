@@ -11,6 +11,17 @@
 (require 'org)
 (require 'ob)
 
+;;; File-based logging for debugging
+(defvar jupyter-termint-debug-log-file (expand-file-name "jupyter-termint-debug.log" "~/"))
+
+(defun jupyter-termint-debug-log (level format-string &rest args)
+  "Log with timestamp to file."
+  (let ((message (apply #'format format-string args))
+        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+    (with-temp-buffer
+      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+      (append-to-file (point-min) (point-max) jupyter-termint-debug-log-file))))
+
 (defgroup jupyter-termint nil
   "Jupyter console integration using termint and vterm."
   :group 'org-babel)
@@ -151,12 +162,42 @@ graph export \"%s\", replace"
 
 ;;; Termint Jupyter Definitions
 
+(defun jupyter-termint--check-direnv-allowed (directory)
+  "Check if direnv is already allowed for DIRECTORY.
+Returns t if allowed, nil otherwise."
+  (jupyter-termint-debug-log 'info "Checking direnv status for directory: %s" directory)
+  (when (and (boundp 'envrc-direnv-executable) envrc-direnv-executable)
+    (let* ((default-directory directory)
+           (status-output (with-temp-buffer
+                           (when (zerop (call-process envrc-direnv-executable nil t nil "status"))
+                             (buffer-string)))))
+      (jupyter-termint-debug-log 'debug "Direnv status output: %s" (or status-output "nil"))
+      (let ((allowed (and status-output
+                          (string-match-p "Found RC allowPath" status-output)
+                          t))) ; Force boolean return value
+        (jupyter-termint-debug-log 'info "Direnv allowed status for %s: %s" directory allowed)
+        allowed))))
+
+(defun jupyter-termint--build-smart-command (project-dir base-command)
+  "Build a smart command that handles direnv properly for PROJECT-DIR.
+If direnv is already allowed, use direnv exec to avoid permission prompts.
+Otherwise, use normal cd command (which may prompt)."
+  (let ((command (if (jupyter-termint--check-direnv-allowed project-dir)
+                     ;; Direnv already allowed - use direnv exec to avoid prompts
+                     (format "sh -c 'cd %s && direnv exec . %s'" project-dir base-command)
+                   ;; Not allowed yet - use normal cd (may prompt user)
+                   (format "sh -c 'cd %s && %s'" project-dir base-command))))
+    (jupyter-termint-debug-log 'info "Built command for %s: %s" project-dir command)
+    command))
+
 (defun jupyter-termint-setup ()
   "Set up termint definitions for Jupyter kernels."
   (message "jupyter-termint: Setting up termint definitions")
+  (jupyter-termint-debug-log 'info "Starting jupyter-termint setup")
   
   ;; Configure termint backend
   (setq termint-backend 'vterm)
+  (jupyter-termint-debug-log 'info "Set termint backend to vterm")
   
   ;; Find the best jupyter executable path
   (let ((jupyter-path (or (executable-find "jupyter")
@@ -165,30 +206,54 @@ graph export \"%s\", replace"
                           (when (file-executable-p "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
                             "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"))))
     
+    (jupyter-termint-debug-log 'info "Found jupyter path: %s" (or jupyter-path "nil"))
+    
     (if jupyter-path
         (progn
           (message "jupyter-termint: Using jupyter at: %s" jupyter-path)
+          (jupyter-termint-debug-log 'info "Using jupyter at: %s" jupyter-path)
           
-          ;; Define termint sessions with full command strings (termint doesn't use separate args)
+          ;; Define termint sessions with smart direnv handling
           (let ((pixi-project-dir "/Users/vwh7mb/projects/wander2"))
-            ;; Define Python Jupyter console (use pixi for proper Python environment)
-            (termint-define "jupyter-python" "dummy"
-                            :bracketed-paste-p t)
-            (setq termint-jupyter-python-cmd (format "sh -c 'cd %s && pixi run jupyter console --kernel python3'" pixi-project-dir))
+            ;; Check direnv status once for logging
+            (if (jupyter-termint--check-direnv-allowed pixi-project-dir)
+                (progn
+                  (message "jupyter-termint: Direnv already allowed for %s - using direnv exec" pixi-project-dir)
+                  (jupyter-termint-debug-log 'info "Direnv already allowed - will use direnv exec"))
+              (progn
+                (message "jupyter-termint: Direnv not yet allowed for %s - may prompt on first run" pixi-project-dir)
+                (jupyter-termint-debug-log 'warn "Direnv not yet allowed - may prompt user")))
             
-            ;; Define R Jupyter console (use pixi for proper R environment)
-            (termint-define "jupyter-r" "dummy"
-                            :bracketed-paste-p t)
-            (setq termint-jupyter-r-cmd (format "sh -c 'cd %s && pixi run jupyter console --kernel ir'" pixi-project-dir))
-            
-            ;; Define Stata Jupyter console
-            (termint-define "jupyter-stata" "dummy"
-                            :bracketed-paste-p t)
-            (setq termint-jupyter-stata-cmd (format "%s console --kernel stata" jupyter-path))))
+            ;; Build smart commands with direnv handling
+            (let ((python-cmd (jupyter-termint--build-smart-command 
+                              pixi-project-dir 
+                              "pixi run jupyter console --kernel python3"))
+                  (r-cmd (jupyter-termint--build-smart-command 
+                         pixi-project-dir 
+                         "pixi run jupyter console --kernel ir"))
+                  (stata-cmd (format "%s console --kernel stata" jupyter-path)))
+              
+              ;; Define Python Jupyter console with smart direnv handling
+              (termint-define "jupyter-python" python-cmd
+                              :bracketed-paste-p t)
+              (jupyter-termint-debug-log 'info "Defined Python console with command: %s" python-cmd)
+              
+              ;; Define R Jupyter console with smart direnv handling
+              (termint-define "jupyter-r" r-cmd
+                              :bracketed-paste-p t)
+              (jupyter-termint-debug-log 'info "Defined R console with command: %s" r-cmd)
+              
+              ;; Define Stata Jupyter console
+              (termint-define "jupyter-stata" stata-cmd
+                              :bracketed-paste-p t)
+              (jupyter-termint-debug-log 'info "Defined Stata console with command: %s" stata-cmd))))
       
-      (message "jupyter-termint: ERROR - No jupyter executable found. Check your PATH or pixi environment.")))
+      (progn
+        (message "jupyter-termint: ERROR - No jupyter executable found. Check your PATH or pixi environment.")
+        (jupyter-termint-debug-log 'error "No jupyter executable found"))))
   
-  (message "jupyter-termint: Termint definitions completed"))
+  (message "jupyter-termint: Termint definitions completed")
+  (jupyter-termint-debug-log 'info "Jupyter-termint setup completed"))
 
 ;;; Org-babel Integration
 
