@@ -158,27 +158,35 @@ graph export \"%s\", replace"
   ;; Configure termint backend
   (setq termint-backend 'vterm)
   
-  ;; Define Python Jupyter console
-  (termint-define "jupyter-python" 
-                  (or (executable-find "jupyter") 
-                      ".pixi/envs/default/bin/jupyter")
-                  :args '("console" "--kernel" "python3")
-                  :bracketed-paste-p t
-                  :source-syntax termint-ipython-source-syntax-template)
-  
-  ;; Define R Jupyter console  
-  (termint-define "jupyter-r"
-                  (or (executable-find "jupyter")
-                      ".pixi/envs/default/bin/jupyter")
-                  :args '("console" "--kernel" "ir")
-                  :bracketed-paste-p t)
-  
-  ;; Define Stata Jupyter console
-  (termint-define "jupyter-stata"
-                  (or (executable-find "jupyter")
-                      ".pixi/envs/default/bin/jupyter")
-                  :args '("console" "--kernel" "stata")
-                  :bracketed-paste-p t)
+  ;; Find the best jupyter executable path
+  (let ((jupyter-path (or (executable-find "jupyter")
+                          (when (file-executable-p ".pixi/envs/default/bin/jupyter")
+                            ".pixi/envs/default/bin/jupyter")
+                          (when (file-executable-p "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
+                            "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"))))
+    
+    (if jupyter-path
+        (progn
+          (message "jupyter-termint: Using jupyter at: %s" jupyter-path)
+          
+          ;; Define termint sessions with full command strings (termint doesn't use separate args)
+          (let ((pixi-project-dir "/Users/vwh7mb/projects/wander2"))
+            ;; Define Python Jupyter console (use pixi for proper Python environment)
+            (termint-define "jupyter-python" "dummy"
+                            :bracketed-paste-p t)
+            (setq termint-jupyter-python-cmd (format "sh -c 'cd %s && pixi run jupyter console --kernel python3'" pixi-project-dir))
+            
+            ;; Define R Jupyter console (use pixi for proper R environment)
+            (termint-define "jupyter-r" "dummy"
+                            :bracketed-paste-p t)
+            (setq termint-jupyter-r-cmd (format "sh -c 'cd %s && pixi run jupyter console --kernel ir'" pixi-project-dir))
+            
+            ;; Define Stata Jupyter console
+            (termint-define "jupyter-stata" "dummy"
+                            :bracketed-paste-p t)
+            (setq termint-jupyter-stata-cmd (format "%s console --kernel stata" jupyter-path))))
+      
+      (message "jupyter-termint: ERROR - No jupyter executable found. Check your PATH or pixi environment.")))
   
   (message "jupyter-termint: Termint definitions completed"))
 
