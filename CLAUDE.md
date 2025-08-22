@@ -88,6 +88,30 @@ dotfiles/
 - **Screenshots**: Always resize screenshots to below 2000 pixels before uploading to Claude to avoid API errors
 - When taking screenshots for debugging/verification, use tools like `convert` or `sips` to resize: `sips -Z 1900 screenshot.png`
 
+### Testing and Verification Protocol
+
+**IMPORTANT**: Testing workflows with `Bash(emacsclient ...)` and screenshots consume excessive context. Instead:
+
+1. **Use the Task tool with general-purpose agent** for all testing workflows that involve:
+   - Multiple `emacsclient --eval` commands
+   - Screenshot verification
+   - Interactive testing of Emacs functionality
+   - Buffer management and verification
+
+2. **Testing subagent should handle**:
+   - All `emacsclient --eval` testing commands
+   - Screenshot capture and verification
+   - Function availability checking
+   - Buffer content verification
+   - Keybinding testing
+
+3. **Main Claude should only**:
+   - Plan the implementation
+   - Write/edit configuration files
+   - Provide final summary of results from subagent
+
+**Example**: "Use the Task tool to create a testing subagent that verifies the jupyter sixel integration works by testing C-RET keybindings, checking buffer creation, sending test plots, and taking screenshots to confirm split window + sixel display."
+
 ### Screenshots and Screen Capture
 
 - **Emacs window screenshots**: Use the window ID approach for precise captures:
