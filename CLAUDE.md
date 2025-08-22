@@ -142,6 +142,12 @@ cd ~/.emacs.d && ./bin/doom sync
 
 **Then** tell user to restart Emacs.
 
+**To restart Emacs daemon/client**: If the Emacs client/daemon is killed or needs restarting, use:
+```bash
+osascript -e 'tell application "Emacs" to activate'
+```
+This properly opens the Emacs.app and starts the daemon.
+
 ### 6. ⚠️ ALWAYS Run Tests Yourself First
 
 **For Basic Syntax/Loading Tests:**

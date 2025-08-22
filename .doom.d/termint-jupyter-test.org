@@ -1,0 +1,24 @@
+* Test Python: Simple calculation
+
+#+begin_src python
+x = [1, 2, 3, 4, 5]
+squares = [i**2 for i in x]
+print(f"Original: {x}")
+print(f"Squares: {squares}")
+print(f"Sum of squares: {sum(squares)}")
+#+end_src
+
+* Test R: Simple Plot
+
+#+begin_src R
+library(ggplot2)
+data <- data.frame(x = 1:10, y = (1:10)^2)
+ggplot(data, aes(x, y)) + geom_line()
+#+end_src
+
+* Test Stata: Histogram
+
+#+begin_src stata
+sysuse auto
+histogram mpg
+#+end_src

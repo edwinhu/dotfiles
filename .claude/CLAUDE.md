@@ -53,3 +53,4 @@ Unless I specify otherwise, write up notes based on the current chat context (e.
 6. System-level changes should be made through nix-darwin configuration
 7. Report times in EST even if logs are in UTC.
 8. Always remember to clean up after yourself, especially with temporary files or directories.
+9. **Emacs daemon restart**: If the Emacs client/daemon is killed or needs restarting, use `osascript -e 'tell application "Emacs" to activate'` to properly restart the Emacs.app and daemon.

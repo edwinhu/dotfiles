@@ -8,11 +8,13 @@
  '(helm-minibuffer-history-key "M-p")
  '(package-selected-packages '(gptel))
  '(safe-local-variable-values
-   '((eval progn
+   '((R-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/R")
+     (jupyter-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
+     (eval progn
       (add-to-list 'exec-path "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin")
       (setenv "PATH"
-       (concat "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin:"
-               (getenv "PATH"))))
+              (concat "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin:"
+                      (getenv "PATH"))))
      (python-shell-interpreter . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/python"))))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.

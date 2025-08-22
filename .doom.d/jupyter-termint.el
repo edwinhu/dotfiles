@@ -258,11 +258,130 @@ Otherwise, use normal cd command (which may prompt)."
 
 ;;; Org-babel Integration
 
+;; Output capture functions for vterm buffers
+(defun jupyter-termint-wait-for-prompt (buffer &optional timeout)
+  "Wait for a jupyter prompt to appear in vterm BUFFER.
+TIMEOUT defaults to 5 seconds for vterm as it may be slower."
+  (let ((timeout (or timeout 5))
+        (start-time (current-time))
+        (prompt-regexp "In \\[[0-9]+\\]: \\|>>> \\|\\.\\.\\. \\|> \\|\\.\\.\\.\\.")
+        (initial-point nil)
+        (output-received nil))
+    (with-current-buffer buffer
+      (goto-char (point-max))
+      (setq initial-point (point))
+      ;; Wait for new output and a prompt
+      (while (and (< (time-to-seconds (time-subtract (current-time) start-time)) timeout)
+                  (progn
+                    (goto-char (point-max))
+                    ;; Check if we got output
+                    (when (> (point) initial-point)
+                      (setq output-received t))
+                    ;; Keep waiting if we haven't seen a prompt yet
+                    (if output-received
+                        ;; Got output, wait a bit for prompt or more output
+                        (not (looking-back prompt-regexp 
+                                          (max (point-min) (- (point) 200))))
+                      ;; No output yet, keep waiting
+                      t)))
+        (sit-for 0.1))
+      ;; Return true if we found a prompt or got output
+      (or (looking-back prompt-regexp (max (point-min) (- (point) 200)))
+          output-received))))
+
+(defun jupyter-termint-extract-output (raw-output code)
+  "Extract clean output from RAW-OUTPUT, removing CODE echo and prompts."
+  (let ((output raw-output))
+    ;; Remove ANSI escape sequences first
+    (setq output (replace-regexp-in-string "\033\\[[0-9;]*m" "" output))
+    
+    ;; Split into lines for better processing
+    (let ((lines (split-string output "\n"))
+          (code-lines (split-string code "\n"))
+          (result-lines '())
+          (in-output nil)
+          (seen-current-code nil))
+      
+      ;; Process each line
+      (dolist (line lines)
+        (let ((trimmed-line (string-trim line)))
+          (cond
+           ;; Skip startup messages and info
+           ((string-match-p "Type 'copyright'\\|IPython\\|enhanced Interactive\\|Tip: Use\\|\\] *$" line)
+            nil)
+           
+           ;; Skip prompts and continuation lines
+           ((string-match-p "^In \\[[0-9]+\\]: *$\\|^>>> *$\\|^\\.\\.\\. *$\\|^   \\.\\.\\.: *$" line)
+            nil)
+           
+           ;; Check if this line matches our code (start of our execution)
+           ((and (not seen-current-code)
+                 (cl-some (lambda (code-line)
+                           (and (not (string-empty-p (string-trim code-line)))
+                                (string-match-p (regexp-quote (string-trim code-line)) trimmed-line)))
+                         code-lines))
+            (setq seen-current-code t)
+            (setq in-output t))
+           
+           ;; If we've seen our code, start collecting output
+           ((and seen-current-code in-output (not (string-empty-p trimmed-line)))
+            ;; Skip lines that are just our code echoed back
+            (unless (cl-some (lambda (code-line)
+                              (and (not (string-empty-p (string-trim code-line)))
+                                   (string= (string-trim code-line) trimmed-line)))
+                            code-lines)
+              (push trimmed-line result-lines))))))
+      
+      ;; Join the result lines
+      (let ((clean-output (string-join (reverse result-lines) "\n")))
+        (setq clean-output (string-trim clean-output))
+        
+        ;; If we have any output after cleaning, return it
+        (if (and clean-output (not (string-empty-p clean-output)))
+            clean-output
+          nil)))))
+
+(defun jupyter-termint-send-string-with-output (buffer code)
+  "Send CODE to vterm BUFFER and capture the output."
+  (jupyter-termint-debug-log 'info "Sending code to %s for output capture" buffer)
+  
+  (with-current-buffer buffer
+    ;; Make sure we're at the end
+    (goto-char (point-max))
+    
+    ;; Mark where we are before sending
+    (let ((output-start (point-marker)))
+      
+      ;; Send the code using termint's send function
+      (let ((send-func (cond
+                       ((string-match-p "python" buffer) 'termint-jupyter-python-send-string)
+                       ((string-match-p "r" buffer) 'termint-jupyter-r-send-string)
+                       ((string-match-p "stata" buffer) 'termint-jupyter-stata-send-string)
+                       (t (error "Unknown buffer type: %s" buffer)))))
+        (when (fboundp send-func)
+          (funcall send-func code)))
+      
+      ;; Wait for output with longer timeout for vterm
+      (jupyter-termint-wait-for-prompt buffer 8)
+      
+      ;; Get everything between our mark and the current position
+      (goto-char (point-max))
+      (let* ((output-end (point))
+             (raw-output (buffer-substring-no-properties output-start output-end)))
+        
+        (jupyter-termint-debug-log 'debug "Raw output captured: %s" raw-output)
+        
+        ;; Extract the actual result
+        (let ((clean-output (jupyter-termint-extract-output raw-output code)))
+          (jupyter-termint-debug-log 'debug "Clean output: %s" clean-output)
+          clean-output)))))
+
 (defun jupyter-termint-execute-python (body params)
   "Execute Python BODY with PARAMS using termint jupyter."
   (message "jupyter-termint: Executing Python code block")
   (let* ((has-graphics (jupyter-termint-detect-graphics-code body "python3"))
-         (results-type (cdr (assq :results params)))
+         (results-assoc (assq :results params))
+         (results-type (when results-assoc (cdr results-assoc)))
          (image-file (when (and has-graphics (string-match-p "file" (or results-type "")))
                        (jupyter-termint-generate-image-filename "python3")))
          (final-code (if image-file
@@ -273,23 +392,37 @@ Otherwise, use normal cd command (which may prompt)."
       (message "jupyter-termint: Generating plot%s..." 
                (if image-file (format " to %s" image-file) "")))
     
-    ;; Send code to termint jupyter-python
-    (termint-jupyter-python-send-string final-code)
-    
-    (when has-graphics
-      (message "jupyter-termint: Python execution completed%s"
-               (if image-file " - plot saved" "")))
-    
-    ;; Return image file path for :results file
-    (if (and image-file (file-exists-p image-file))
-        image-file
-      nil)))
+    ;; Execute code and capture output
+    (if image-file
+        ;; Graphics mode - send to console and return image file
+        (progn
+          (termint-jupyter-python-send-string final-code)
+          (when has-graphics
+            (message "jupyter-termint: Python execution completed%s"
+                     (if image-file " - plot saved" "")))
+          ;; Return image file path for :results file
+          (if (file-exists-p image-file)
+              image-file
+            nil))
+      ;; Text mode - send code and capture output
+      (progn
+        (message "jupyter-termint: Executing Python code for text output...")
+        ;; Ensure console is running first
+        (jupyter-termint-ensure-console-with-features "python" "")
+        ;; Send code to console and capture output
+        (let ((result (jupyter-termint-send-string-with-output "*jupyter-python*" final-code)))
+          (message "jupyter-termint: Python execution completed with result")
+          (message "jupyter-termint: Returning result: '%s'" result)
+          (message "jupyter-termint: Result type: %s, length: %d" (type-of result) (length result))
+          result)))))
 
 (defun jupyter-termint-execute-r (body params)
   "Execute R BODY with PARAMS using termint jupyter."
   (message "jupyter-termint: Executing R code block")
+  (message "jupyter-termint: R params = %S" params)
   (let* ((has-graphics (jupyter-termint-detect-graphics-code body "ir"))
-         (results-type (cdr (assq :results params)))
+         (results-assoc (assq :results params))
+         (results-type (when results-assoc (cdr results-assoc)))
          (image-file (when (and has-graphics (string-match-p "file" (or results-type "")))
                        (jupyter-termint-generate-image-filename "r")))
          (final-code (if image-file
@@ -300,23 +433,36 @@ Otherwise, use normal cd command (which may prompt)."
       (message "jupyter-termint: Generating plot%s..." 
                (if image-file (format " to %s" image-file) "")))
     
-    ;; Send code to termint jupyter-r
-    (termint-jupyter-r-send-string final-code)
-    
-    (when has-graphics
-      (message "jupyter-termint: R execution completed%s"
-               (if image-file " - plot saved" "")))
-    
-    ;; Return image file path for :results file
-    (if (and image-file (file-exists-p image-file))
-        image-file
-      nil)))
+    ;; Execute code and capture output
+    (if image-file
+        ;; Graphics mode - send to console and return image file
+        (progn
+          (termint-jupyter-r-send-string final-code)
+          (when has-graphics
+            (message "jupyter-termint: R execution completed%s"
+                     (if image-file " - plot saved" "")))
+          ;; Return image file path for :results file
+          (if (file-exists-p image-file)
+              image-file
+            nil))
+      ;; Text mode - send code and capture output
+      (progn
+        (message "jupyter-termint: Executing R code for text output...")
+        ;; Ensure console is running first
+        (jupyter-termint-ensure-console-with-features "r" "")
+        ;; Send code to console and capture output
+        (let ((result (jupyter-termint-send-string-with-output "*jupyter-r*" final-code)))
+          (message "jupyter-termint: R execution completed with result")
+          (message "jupyter-termint: R Returning result: '%s'" result)
+          (message "jupyter-termint: R Result type: %s, length: %d" (type-of result) (length result))
+          result)))))
 
 (defun jupyter-termint-execute-stata (body params)
   "Execute Stata BODY with PARAMS using termint jupyter."
   (message "jupyter-termint: Executing Stata code block")
   (let* ((has-graphics (jupyter-termint-detect-graphics-code body "stata"))
-         (results-type (cdr (assq :results params)))
+         (results-assoc (assq :results params))
+         (results-type (when results-assoc (cdr results-assoc)))
          (image-file (when (and has-graphics (string-match-p "file" (or results-type "")))
                        (jupyter-termint-generate-image-filename "stata")))
          (final-code (if image-file
@@ -327,17 +473,27 @@ Otherwise, use normal cd command (which may prompt)."
       (message "jupyter-termint: Generating plot%s..." 
                (if image-file (format " to %s" image-file) "")))
     
-    ;; Send code to termint jupyter-stata
-    (termint-jupyter-stata-send-string final-code)
-    
-    (when has-graphics
-      (message "jupyter-termint: Stata execution completed%s"
-               (if image-file " - plot saved" "")))
-    
-    ;; Return image file path for :results file
-    (if (and image-file (file-exists-p image-file))
-        image-file
-      nil)))
+    ;; Execute code and capture output
+    (if image-file
+        ;; Graphics mode - send to console and return image file
+        (progn
+          (termint-jupyter-stata-send-string final-code)
+          (when has-graphics
+            (message "jupyter-termint: Stata execution completed%s"
+                     (if image-file " - plot saved" "")))
+          ;; Return image file path for :results file
+          (if (file-exists-p image-file)
+              image-file
+            nil))
+      ;; Text mode - send code and capture output
+      (progn
+        (message "jupyter-termint: Executing Stata code for text output...")
+        ;; Ensure console is running first
+        (jupyter-termint-ensure-console-with-features "stata" "")
+        ;; Send code to console and capture output
+        (let ((result (jupyter-termint-send-string-with-output "*jupyter-stata*" final-code)))
+          (message "jupyter-termint: Stata execution completed with result")
+          result)))))
 
 ;;; Override org-babel functions
 

@@ -1,0 +1,35 @@
+#+TITLE: Test Org-Babel Hello World
+#+AUTHOR: Test Suite
+
+* Python Hello World
+
+Simple print statement test:
+
+#+begin_src python
+print("Hello, World from Python!")
+print("This is line 2")
+x = 42
+print(f"The answer is: {x}")
+#+end_src
+
+* R Hello World
+
+Simple cat statement test:
+
+#+begin_src R
+cat("Hello, World from R!\n")
+cat("This is line 2\n")
+x <- 42
+cat("The answer is:", x, "\n")
+#+end_src
+
+* Stata Hello World
+
+Simple display command test:
+
+#+begin_src stata
+display "Hello, World from Stata!"
+display "This is line 2"
+local x = 42
+display "The answer is: " `x'
+#+end_src

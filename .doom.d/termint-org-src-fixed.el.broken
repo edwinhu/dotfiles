@@ -1,0 +1,465 @@
+;;; termint-org-src-fixed.el --- Fixed termint org-src integration -*- lexical-binding: t; -*-
+
+(require 'termint)
+(require 'org-src)
+
+;;; Debug logging
+(defvar termint-org-src-debug-log-file (expand-file-name "termint-org-src-debug.log" "~/"))
+
+(defun termint-org-src-debug-log (level format-string &rest args)
+  "Log with timestamp to file."
+  (let ((message (apply #'format format-string args))
+        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+    (with-temp-buffer
+      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+      (append-to-file (point-min) (point-max) termint-org-src-debug-log-file))))
+
+(defun termint-org-src-monitor-vterm-startup (buffer-name timeout)
+  "Monitor vterm buffer startup for permission prompts."
+  (termint-org-src-debug-log 'info "Starting vterm monitoring for buffer: %s" buffer-name)
+  (let ((start-time (current-time))
+        (prompt-detected nil)
+        (content-history '()))
+    
+    ;; Monitor buffer content for up to timeout seconds
+    (while (and (< (float-time (time-since start-time)) timeout)
+                (not prompt-detected))
+      
+      (when (get-buffer buffer-name)
+        (let ((current-content 
+               (with-current-buffer buffer-name
+                 (buffer-substring-no-properties (point-min) (point-max)))))
+          
+          ;; Check for permission-related prompts
+          (when (and current-content
+                     (or (string-match-p "direnv.*allow" current-content)
+                         (string-match-p "\\[y\\]es/\\[n\\]o" current-content)
+                         (string-match-p "Allow.*\\?" current-content)
+                         (string-match-p "permission" current-content)))
+            (setq prompt-detected t)
+            (termint-org-src-debug-log 'warning "PERMISSION PROMPT DETECTED in vterm buffer!")
+            (termint-org-src-debug-log 'warning "Buffer content: %s" current-content))
+          
+          ;; Store content snapshot
+          (push (list (current-time) (length current-content)) content-history)))
+      
+      (sleep-for 0.5))
+    
+    (termint-org-src-debug-log 'info "Vterm monitoring completed. Prompt detected: %s" prompt-detected)
+    (termint-org-src-debug-log 'info "Content history: %s" content-history)
+    prompt-detected))
+
+(defun termint-org-src-clear-log ()
+  "Clear the debug log file."
+  (with-temp-buffer
+    (write-file termint-org-src-debug-log-file)))
+
+;;; Direnv auto-approval (same pattern as safe-local-variable-p in config.el)
+(defun termint-org-src-direnv-approval-advice (original-func prompt &rest args)
+  "Advice to auto-approve direnv prompts in trusted directories."
+  (if (and prompt 
+           (string-match-p "allow" prompt)
+           (file-exists-p "~/projects/wander2/.envrc"))
+      (progn
+        (termint-org-src-debug-log 'info "Auto-approving direnv for trusted directory")
+        t) ; Auto-approve
+    (apply original-func prompt args)))
+
+(defun termint-org-src-setup-direnv-auto-approval ()
+  "Setup advice to auto-approve direnv prompts (like safe-local-variable-p pattern)."
+  (advice-add 'y-or-n-p :around #'termint-org-src-direnv-approval-advice)
+  (advice-add 'yes-or-no-p :around #'termint-org-src-direnv-approval-advice) 
+  (termint-org-src-debug-log 'info "Added direnv auto-approval advice"))
+
+;;; Direnv checking (using proven envrc-smart approach from config.el)
+(defun termint-org-src-check-direnv-status (env-dir)
+  "Check if ENV-DIR's .envrc is already allowed by parsing direnv status.
+Returns 'allowed if the .envrc is loaded, 'blocked if it exists but not loaded,
+or 'none if no .envrc exists."
+  (termint-org-src-debug-log 'info "Checking direnv status for directory: %s" env-dir)
+  (let* ((default-directory env-dir)
+         (status-output (when (and (boundp 'envrc-direnv-executable) envrc-direnv-executable)
+                         (with-temp-buffer
+                           (when (zerop (call-process envrc-direnv-executable nil t nil "status"))
+                             (buffer-string))))))
+    (termint-org-src-debug-log 'debug "Direnv status output: %s" (or status-output "nil"))
+    (let ((status
+           (cond
+            ;; .envrc is loaded and active (ideal case)
+            ((and status-output
+                  (string-match-p "Found RC path" status-output)
+                  (not (string-match-p "No .envrc.*loaded" status-output))
+                  (not (string-match-p "Found RC allowed 0" status-output)))
+             'allowed)
+            
+            ;; .envrc exists but not loaded (has "Found RC path" but "No .envrc loaded" or "Found RC allowed 0")
+            ((and (envrc--env-dir-p env-dir)
+                  status-output
+                  (string-match-p "Found RC path" status-output)
+                  (or (string-match-p "No .envrc.*loaded" status-output)
+                      (string-match-p "Found RC allowed 0" status-output)))
+             'blocked)
+            
+            ;; Default fallback
+            (t 'none))))
+      (termint-org-src-debug-log 'info "Direnv status for %s: %s" env-dir status)
+      status)))
+
+(defun termint-org-src-build-smart-command (project-dir base-command)
+  "Build a smart command that handles direnv properly for PROJECT-DIR.
+Uses the proven envrc-smart approach to avoid permission prompts."
+  (let* ((status (termint-org-src-check-direnv-status project-dir))
+         (command (cond
+                   ;; Already allowed - use direnv exec to avoid any prompts
+                   ((eq status 'allowed)
+                    (format "sh -c 'cd %s && direnv exec . %s'" project-dir base-command))
+                   
+                   ;; Blocked - .envrc exists but not allowed, will prompt properly
+                   ((eq status 'blocked)
+                    (format "sh -c 'cd %s && %s'" project-dir base-command))
+                   
+                   ;; No .envrc - just use normal cd
+                   (t
+                    (format "sh -c 'cd %s && %s'" project-dir base-command)))))
+    (termint-org-src-debug-log 'info "Built command for %s (status: %s): %s" project-dir status command)
+    command))
+
+;;; Language detection
+(defun termint-org-src-detect-kernel ()
+  "Detect kernel from org-src buffer language."
+  (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
+                                 (match-string 1 (buffer-name))))
+        (lang-from-variable (bound-and-true-p org-src--lang)))
+    (termint-org-src-debug-log 'debug "Buffer name: %s" (buffer-name))
+    (termint-org-src-debug-log 'debug "Language from buffer name: %s" lang-from-buffer-name)
+    (termint-org-src-debug-log 'debug "Language from org-src--lang: %s" lang-from-variable)
+    (termint-org-src-debug-log 'debug "Major mode: %s" major-mode)
+    
+    (let ((detected-lang (or lang-from-variable lang-from-buffer-name)))
+      (cond
+       ((or (equal detected-lang "python") (eq major-mode 'python-mode) (eq major-mode 'python-ts-mode)) "python")
+       ((or (equal detected-lang "r") (equal detected-lang "R") (eq major-mode 'ess-r-mode)) "r") 
+       ((or (equal detected-lang "stata") (eq major-mode 'stata-mode)) "stata")
+       (t (progn 
+            (termint-org-src-debug-log 'info "Using fallback kernel: python")
+            "python"))))))
+
+;;; Console management with all features
+(defun termint-org-src-smart-python-start ()
+  "Start Python jupyter console with smart direnv command."
+  (interactive)
+  (termint-org-src-debug-log 'info "Starting smart Python console with direnv")
+  
+  ;; Kill any existing hung buffer first
+  (when (get-buffer "*jupyter-python*")
+    (termint-org-src-debug-log 'info "Killing existing hung *jupyter-python* buffer")
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*jupyter-python*")))
+  
+  ;; Use approach that prevents direnv prompts by setting shell environment
+  (let ((pixi-path "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"))
+    (termint-org-src-debug-log 'info "=== PREVENTING DIRENV PROMPTS WITH SHELL ENV ===")
+    
+    ;; Use a wrapper script that bypasses direnv entirely 
+    (let* ((wrapper-script "/tmp/jupyter-no-direnv.sh")
+           (script-content (format "#!/bin/bash\n# Bypass direnv completely\nunset DIRENV_DIR\nunset DIRENV_DIFF\ncd /tmp\nexec %s console --kernel python3\n" pixi-path)))
+      
+      ;; Create wrapper script
+      (with-temp-file wrapper-script
+        (insert script-content))
+      (set-file-modes wrapper-script #o755)
+      
+      (termint-org-src-debug-log 'info "=== USING WRAPPER SCRIPT TO BYPASS DIRENV ===")
+      (termint-org-src-debug-log 'info "Created wrapper script: %s" wrapper-script)
+      (termint-define "jupyter-python" wrapper-script :bracketed-paste-p t)
+      (termint-org-src-debug-log 'info "Starting termint-jupyter-python asynchronously...")
+      
+      ;; Start console asynchronously to prevent Emacs hanging
+      (run-with-idle-timer 0.1 nil
+                           (lambda ()
+                             (termint-org-src-debug-log 'info "Async console startup initiated")
+                             (termint-jupyter-python-start)
+                             (termint-org-src-debug-log 'info "Async console startup completed")))
+      
+      ;; Start monitoring for permission prompts in background
+      (run-with-timer 0.5 nil 
+                      (lambda () 
+                        (termint-org-src-monitor-vterm-startup "*jupyter-python*" 30)))
+      
+      (termint-org-src-debug-log 'info "Console startup scheduled asynchronously"))))
+
+(defun termint-org-src-display-console-right (buffer &optional original-buffer original-window)
+  "Display console BUFFER in a right split window, preserving focus on ORIGINAL-BUFFER in ORIGINAL-WINDOW."
+  (termint-org-src-debug-log 'info "Displaying console in right split, preserving focus")
+  
+  (let ((initial-window (or original-window (selected-window)))
+        (initial-buffer (or original-buffer (current-buffer))))
+    
+    (termint-org-src-debug-log 'info "Initial buffer: %s" (buffer-name initial-buffer))
+    
+    ;; Use display-buffer with specific parameters for right split
+    (let ((console-window (display-buffer buffer
+                                          '((display-buffer-reuse-window
+                                             display-buffer-in-side-window)
+                                            (side . right)
+                                            (window-width . 0.5)
+                                            (inhibit-same-window . t)))))
+      
+      (termint-org-src-debug-log 'info "Console window created: %s" console-window)
+      
+      (when console-window
+        ;; Briefly switch to console window to scroll to bottom
+        (with-selected-window console-window
+          (goto-char (point-max)))
+        
+        ;; Force restore focus to original window and buffer
+        (when (window-live-p initial-window)
+          (termint-org-src-debug-log 'info "Restoring focus to initial window")
+          (select-window initial-window))
+        
+        (when (buffer-live-p initial-buffer)
+          (termint-org-src-debug-log 'info "Restoring buffer to: %s" (buffer-name initial-buffer))
+          (set-window-buffer (selected-window) initial-buffer)
+          ;; CRITICAL: Actually switch to the buffer to make it current
+          (switch-to-buffer initial-buffer))
+        
+        (termint-org-src-debug-log 'info "Focus restored to org-src buffer")))))
+
+(defun termint-org-src-ensure-console-with-features (kernel code)
+  "Ensure console for KERNEL is running with direnv and window management, then send CODE."
+  (let ((buffer-name "*jupyter-python*") ; For now, only handle Python
+        (start-func 'termint-org-src-smart-python-start)
+        ;; CRITICAL: Capture org-src buffer/window BEFORE any console operations
+        (original-buffer (current-buffer))
+        (original-window (selected-window)))
+    
+    (termint-org-src-debug-log 'info "Captured original state - Buffer: %s, Window: %s" 
+                              (buffer-name original-buffer) original-window)
+    (termint-org-src-debug-log 'info "Checking for console buffer: %s" buffer-name)
+    
+    ;; Check if console buffer exists and has a live process
+    (let ((console-buffer (get-buffer buffer-name)))
+      (if (and console-buffer 
+               (buffer-live-p console-buffer)
+               (get-buffer-process console-buffer)
+               (process-live-p (get-buffer-process console-buffer)))
+          (progn
+            (termint-org-src-debug-log 'info "Console already running: %s" buffer-name)
+            ;; Console exists, just display it and send code
+            (termint-org-src-display-console-right console-buffer original-buffer original-window)
+            (termint-jupyter-python-send-string code))
+        
+        ;; Console doesn't exist or is dead, start it
+        (progn
+          (termint-org-src-debug-log 'info "Starting new console for %s kernel" kernel)
+          (message "Starting %s console with direnv..." kernel)
+          
+          ;; Simple synchronous startup with auto-approval enabled  
+          (funcall start-func)
+          
+          ;; Wait briefly for buffer creation
+          (let ((max-wait 3) (wait-count 0))
+            (while (and (< wait-count max-wait)
+                       (not (get-buffer buffer-name)))
+              (sit-for 0.5)  ; Use sit-for instead of sleep-for to allow interruption
+              (setq wait-count (1+ wait-count)))
+            
+            (let ((new-buffer (get-buffer buffer-name)))
+              (if new-buffer
+                  (progn
+                    (termint-org-src-debug-log 'info "Console buffer created: %s" buffer-name)
+                    (message "%s console ready!" kernel)
+                    ;; Display in right split
+                    (termint-org-src-display-console-right new-buffer original-buffer original-window)
+                    ;; Send code
+                    (termint-jupyter-python-send-string code))
+                (progn
+                  (termint-org-src-debug-log 'error "Console buffer not created after %d seconds" max-wait)
+                  (error "Failed to create %s console buffer" kernel))))))))))
+
+;;; Diagnostic function
+(defun termint-org-src-diagnose-direnv ()
+  "Comprehensive direnv diagnostics for troubleshooting."
+  (interactive)
+  (termint-org-src-debug-log 'info "=== COMPREHENSIVE DIRENV DIAGNOSIS ===")
+  
+  (let ((default-directory "/Users/vwh7mb/projects/wander2"))
+    ;; Test 1: Check .envrc file
+    (let ((envrc-path "/Users/vwh7mb/projects/wander2/.envrc"))
+      (termint-org-src-debug-log 'info "ENVRC FILE: exists=%s, readable=%s" 
+                                (file-exists-p envrc-path) 
+                                (file-readable-p envrc-path))
+      (when (file-exists-p envrc-path)
+        (termint-org-src-debug-log 'info "ENVRC CONTENT: %s" 
+                                  (with-temp-buffer 
+                                    (insert-file-contents envrc-path)
+                                    (buffer-string)))))
+    
+    ;; Test 2: Check direnv allow files
+    (let ((allow-dir "~/.local/share/direnv/allow/"))
+      (when (file-directory-p (expand-file-name allow-dir))
+        (termint-org-src-debug-log 'info "ALLOW FILES: %s" 
+                                  (directory-files (expand-file-name allow-dir)))))
+    
+    ;; Test 3: Manual direnv commands
+    (dolist (cmd '(("status") ("allow") ("status")))
+      (with-temp-buffer
+        (let ((result (apply #'call-process "direnv" nil t nil cmd)))
+          (termint-org-src-debug-log 'info "DIRENV %s (exit=%s): %s" 
+                                    (mapconcat #'identity cmd " ")
+                                    result (buffer-string)))))
+    
+    ;; Test 4: Test actual environment loading
+    (with-temp-buffer
+      (let ((result (call-process "bash" nil t nil "-c" 
+                                  "cd /Users/vwh7mb/projects/wander2 && eval \"$(direnv export bash)\" && echo SUCCESS")))
+        (termint-org-src-debug-log 'info "BASH DIRENV EXPORT TEST (exit=%s): %s" 
+                                  result (buffer-string))))
+    
+    ;; Test 5: Compare pixi with and without direnv
+    (with-temp-buffer
+      (let ((result (call-process "bash" nil t nil "-c" 
+                                  "cd /Users/vwh7mb/projects/wander2 && /Users/vwh7mb/.nix-profile/bin/pixi --version")))
+        (termint-org-src-debug-log 'info "PIXI DIRECT TEST (exit=%s): %s" 
+                                  result (buffer-string)))))
+  
+  (termint-org-src-debug-log 'info "=== DIAGNOSIS COMPLETE ===")
+  (message "Direnv diagnosis complete - check %s" termint-org-src-debug-log-file))
+
+;;; Console buffer monitoring function  
+(defun termint-org-src-monitor-console-startup ()
+  "Monitor console buffer for permission prompts during startup."
+  (interactive)
+  (termint-org-src-debug-log 'info "=== CONSOLE STARTUP MONITOR ===")
+  
+  (when (get-buffer "*jupyter-python*")
+    (with-current-buffer "*jupyter-python*"
+      (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+        (termint-org-src-debug-log 'info "CONSOLE BUFFER LENGTH: %d" (length content))
+        (termint-org-src-debug-log 'info "CONSOLE BUFFER CONTENT:\n%s" content)
+        
+        ;; Check for specific prompt patterns
+        (let ((prompt-patterns '("Y/n" "Do you want to apply it" "direnv: error" "allow" "deny")))
+          (dolist (pattern prompt-patterns)
+            (when (string-match-p pattern content)
+              (termint-org-src-debug-log 'error "FOUND PROMPT PATTERN: '%s'" pattern)))))))
+  
+  (termint-org-src-debug-log 'info "=== MONITOR COMPLETE ==="))
+
+;;; Simple test function for real environment
+(defun termint-org-src-test-isolation ()
+  "Test isolated environment approach."
+  (interactive)
+  (termint-org-src-debug-log 'info "=== TESTING ISOLATED ENVIRONMENT ===")
+  
+  ;; Kill existing console
+  (when (get-buffer "*jupyter-python*")
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*jupyter-python*")))
+  
+  (message "Testing isolated environment - check debug log and console buffer...")
+  (termint-org-src-smart-python-start))
+
+;;; Main function
+(defun termint-org-src-send-simple ()
+  "Send code to jupyter console - simple synchronous approach."
+  (interactive)
+  (termint-org-src-debug-log 'info "Starting simple synchronous send")
+  
+  (let* ((code (buffer-substring-no-properties (point-min) (point-max)))
+         (original-window (selected-window))
+         (original-buffer (current-buffer)))
+    
+    (termint-org-src-debug-log 'info "Code: %s" code)
+    (termint-org-src-debug-log 'info "Original buffer: %s" (buffer-name original-buffer))
+    
+    ;; Check if console exists
+    (unless (and (get-buffer "*jupyter-python*")
+                 (get-buffer-process (get-buffer "*jupyter-python*"))
+                 (process-live-p (get-buffer-process (get-buffer "*jupyter-python*"))))
+      
+      (termint-org-src-debug-log 'info "Starting console synchronously")
+      (message "Starting Jupyter console...")
+      
+      ;; Simple synchronous startup with direnv auto-approval
+      (termint-jupyter-python-start)
+      
+      ;; Auto-answer direnv prompt using timer
+      (when (get-buffer "*jupyter-python*")
+        (let ((auto-answer-timer nil)
+              (attempts 0))
+          (setq auto-answer-timer
+            (run-with-timer 0.5 0.5 
+              (lambda ()
+                (setq attempts (1+ attempts))
+                (if (> attempts 10) ; Give up after 5 seconds
+                    (progn
+                      (termint-org-src-debug-log 'info "Giving up on auto-answer after 10 attempts")
+                      (cancel-timer auto-answer-timer))
+                  (when (get-buffer "*jupyter-python*")
+                    (with-current-buffer "*jupyter-python*"
+                      (when (save-excursion
+                              (goto-char (point-min))
+                              (search-forward "Do you want to apply it?" nil t))
+                        (termint-org-src-debug-log 'info "Auto-answering direnv prompt")
+                        (vterm-send-string "y")
+                        (vterm-send-return)
+                        (cancel-timer auto-answer-timer)))))))))
+      
+      ;; Display in right window, keeping original buffer on left
+      (when (get-buffer "*jupyter-python*")
+        (termint-org-src-debug-log 'info "Creating right window split")
+        ;; Ensure we're back to original buffer and window
+        (select-window original-window)
+        (switch-to-buffer original-buffer)
+        ;; Create split and show jupyter on right
+        (split-window-right)
+        (other-window 1)
+        (switch-to-buffer "*jupyter-python*")
+        ;; Return to original
+        (select-window original-window)
+        (switch-to-buffer original-buffer)
+        (termint-org-src-debug-log 'info "Window split created, org-src buffer restored to left")))
+    
+    ;; Send code
+    (termint-org-src-debug-log 'info "Sending code to console")
+    (termint-jupyter-python-send-string code)
+    (message "Code sent to console")))
+
+;;; Keybinding setup
+(defun termint-org-src-setup-keybinding ()
+  "Setup C-RET keybinding by unbinding Doom keys first."
+  (termint-org-src-debug-log 'info "Setting up keybinding by unbinding Doom defaults")
+  
+  ;; Unbind the Doom default C-RET keybinding globally
+  (map! "C-<return>" nil)
+  
+  ;; Set up hook for org-src buffers
+  (add-hook 'python-mode-hook 
+            (lambda ()
+              (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
+                (termint-org-src-debug-log 'info "Setting up C-<return> in org-src buffer: %s" (buffer-name))
+                
+                ;; Unbind in all evil states for this buffer
+                (evil-local-set-key 'insert (kbd "C-<return>") nil)
+                (evil-local-set-key 'normal (kbd "C-<return>") nil)
+                (evil-local-set-key 'visual (kbd "C-<return>") nil)
+                
+                ;; Now bind our function
+                (evil-local-set-key 'insert (kbd "C-<return>") #'termint-org-src-send-simple)
+                (evil-local-set-key 'normal (kbd "C-<return>") #'termint-org-src-send-simple)
+                (evil-local-set-key 'visual (kbd "C-<return>") #'termint-org-src-send-simple)
+                (local-set-key (kbd "C-<return>") #'termint-org-src-send-simple)
+                
+                (termint-org-src-debug-log 'info "Unbound Doom C-<return> and bound termint-org-src-send-simple"))))
+  
+  (termint-org-src-debug-log 'info "Added keybinding hooks with Doom unbinding"))
+
+;; Initialize
+(termint-org-src-clear-log)
+(termint-org-src-debug-log 'info "termint-org-src-fixed.el loaded")
+(termint-org-src-setup-keybinding)
+(termint-org-src-setup-direnv-auto-approval)
+
+(provide 'termint-org-src-fixed)
+;;; termint-org-src-fixed.el ends here
