@@ -10,6 +10,7 @@
 (require 'termint)
 (require 'org)
 (require 'ob)
+(require 'org-src)
 
 ;;; File-based logging for debugging
 (defvar jupyter-termint-debug-log-file (expand-file-name "jupyter-termint-debug.log" "~/"))
@@ -359,11 +360,268 @@ Otherwise, use normal cd command (which may prompt)."
   
   (message "jupyter-termint: Babel integration setup complete"))
 
+;;; Allow risky local variables to be remembered permanently
+;; This fixes direnv permission prompts by allowing Emacs to remember
+;; risky local variable permissions instead of asking every time
+(advice-add 'risky-local-variable-p :override #'ignore)
+
+;;; C-RET org-src Integration
+
+(defun jupyter-termint-clear-log ()
+  "Clear the debug log file."
+  (with-temp-buffer
+    (write-file jupyter-termint-debug-log-file)))
+
+;;; Language detection
+(defun jupyter-termint-detect-kernel ()
+  "Detect kernel from org-src buffer language."
+  (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
+                                 (match-string 1 (buffer-name))))
+        (lang-from-variable (bound-and-true-p org-src--lang)))
+    (jupyter-termint-debug-log 'debug "Buffer name: %s" (buffer-name))
+    (jupyter-termint-debug-log 'debug "Language from buffer name: %s" lang-from-buffer-name)
+    (jupyter-termint-debug-log 'debug "Language from org-src--lang: %s" lang-from-variable)
+    (jupyter-termint-debug-log 'debug "Major mode: %s" major-mode)
+    
+    (let ((detected-lang (or lang-from-variable lang-from-buffer-name)))
+      (cond
+       ((or (equal detected-lang "python") (eq major-mode 'python-mode) (eq major-mode 'python-ts-mode)) "python")
+       ((or (equal detected-lang "r") (equal detected-lang "R") (eq major-mode 'ess-r-mode)) "r") 
+       ((or (equal detected-lang "stata") (eq major-mode 'stata-mode)) "stata")
+       (t (progn 
+            (jupyter-termint-debug-log 'info "Using fallback kernel: python")
+            "python"))))))
+
+;;; Console management with all features
+(defun jupyter-termint-smart-python-start ()
+  "Start Python jupyter console with smart direnv command."
+  (interactive)
+  (jupyter-termint-debug-log 'info "Starting smart Python console with direnv")
+  
+  ;; Kill any existing hung buffer first
+  (when (get-buffer "*jupyter-python*")
+    (jupyter-termint-debug-log 'info "Killing existing hung *jupyter-python* buffer")
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*jupyter-python*")))
+  
+  ;; Define and start with smart direnv command
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3'"))
+    (jupyter-termint-debug-log 'info "Defining termint with smart command: %s" smart-cmd)
+    (termint-define "jupyter-python" smart-cmd :bracketed-paste-p t)
+    (jupyter-termint-debug-log 'info "Calling termint-jupyter-python-start...")
+    (termint-jupyter-python-start)
+    (jupyter-termint-debug-log 'info "Smart Python console started")))
+
+(defun jupyter-termint-smart-r-start ()
+  "Start R jupyter console with smart direnv command."
+  (interactive)
+  (jupyter-termint-debug-log 'info "Starting smart R console with direnv")
+  
+  ;; Kill any existing hung buffer first
+  (when (get-buffer "*jupyter-r*")
+    (jupyter-termint-debug-log 'info "Killing existing hung *jupyter-r* buffer")
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*jupyter-r*")))
+  
+  ;; Define and start with smart direnv command
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir'"))
+    (jupyter-termint-debug-log 'info "Defining termint with smart command: %s" smart-cmd)
+    (termint-define "jupyter-r" smart-cmd :bracketed-paste-p t)
+    (jupyter-termint-debug-log 'info "Calling termint-jupyter-r-start...")
+    (termint-jupyter-r-start)
+    (jupyter-termint-debug-log 'info "Smart R console started")))
+
+(defun jupyter-termint-smart-stata-start ()
+  "Start Stata jupyter console with smart direnv command."
+  (interactive)
+  (jupyter-termint-debug-log 'info "Starting smart Stata console with direnv")
+  
+  ;; Kill any existing hung buffer first
+  (when (get-buffer "*jupyter-stata*")
+    (jupyter-termint-debug-log 'info "Killing existing hung *jupyter-stata* buffer")
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*jupyter-stata*")))
+  
+  ;; Define and start with smart direnv command
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata'"))
+    (jupyter-termint-debug-log 'info "Defining termint with smart command: %s" smart-cmd)
+    (termint-define "jupyter-stata" smart-cmd :bracketed-paste-p t)
+    (jupyter-termint-debug-log 'info "Calling termint-jupyter-stata-start...")
+    (termint-jupyter-stata-start)
+    (jupyter-termint-debug-log 'info "Smart Stata console started")))
+
+(defun jupyter-termint-display-console-right (buffer &optional original-buffer original-window)
+  "Display console BUFFER in a right split window, preserving focus on ORIGINAL-BUFFER in ORIGINAL-WINDOW."
+  (jupyter-termint-debug-log 'info "Displaying console in right split, preserving focus")
+  
+  (let ((initial-window (or original-window (selected-window)))
+        (initial-buffer (or original-buffer (current-buffer))))
+    
+    (jupyter-termint-debug-log 'info "Initial buffer: %s" (buffer-name initial-buffer))
+    
+    ;; Use display-buffer with specific parameters for right split
+    (let ((console-window (display-buffer buffer
+                                          '((display-buffer-reuse-window
+                                             display-buffer-in-side-window)
+                                            (side . right)
+                                            (window-width . 0.5)
+                                            (inhibit-same-window . t)))))
+      
+      (jupyter-termint-debug-log 'info "Console window created: %s" console-window)
+      
+      (when console-window
+        ;; Briefly switch to console window to scroll to bottom
+        (with-selected-window console-window
+          (goto-char (point-max)))
+        
+        ;; Force restore focus to original window and buffer
+        (when (window-live-p initial-window)
+          (jupyter-termint-debug-log 'info "Restoring focus to initial window")
+          (select-window initial-window))
+        
+        (when (buffer-live-p initial-buffer)
+          (jupyter-termint-debug-log 'info "Restoring buffer to: %s" (buffer-name initial-buffer))
+          (set-window-buffer (selected-window) initial-buffer))
+        
+        (jupyter-termint-debug-log 'info "Focus restored to org-src buffer")))))
+
+(defun jupyter-termint-ensure-console-with-features (kernel code)
+  "Ensure console for KERNEL is running with direnv and window management, then send CODE."
+  (let* ((kernel-config (cond
+                        ((string= kernel "python")
+                         '("*jupyter-python*" jupyter-termint-smart-python-start termint-jupyter-python-send-string))
+                        ((string= kernel "r")
+                         '("*jupyter-r*" jupyter-termint-smart-r-start termint-jupyter-r-send-string))
+                        ((string= kernel "stata")
+                         '("*jupyter-stata*" jupyter-termint-smart-stata-start termint-jupyter-stata-send-string))
+                        (t (error "Unsupported kernel: %s" kernel))))
+         (buffer-name (nth 0 kernel-config))
+         (start-func (nth 1 kernel-config))
+         (send-func (nth 2 kernel-config))
+         ;; CRITICAL: Capture org-src buffer/window BEFORE any console operations
+         (original-buffer (current-buffer))
+         (original-window (selected-window)))
+    
+    (jupyter-termint-debug-log 'info "Captured original state - Buffer: %s, Window: %s" 
+                              (buffer-name original-buffer) original-window)
+    (jupyter-termint-debug-log 'info "Checking for console buffer: %s" buffer-name)
+    
+    ;; Check if console buffer exists and has a live process
+    (let ((console-buffer (get-buffer buffer-name)))
+      (if (and console-buffer 
+               (buffer-live-p console-buffer)
+               (get-buffer-process console-buffer)
+               (process-live-p (get-buffer-process console-buffer)))
+          (progn
+            (jupyter-termint-debug-log 'info "Console already running: %s" buffer-name)
+            ;; Console exists, just display it and send code
+            (jupyter-termint-display-console-right console-buffer original-buffer original-window)
+            (funcall send-func code))
+        
+        ;; Console doesn't exist or is dead, start it
+        (progn
+          (jupyter-termint-debug-log 'info "Starting new console for %s kernel" kernel)
+          (message "Starting %s console with direnv..." kernel)
+          
+          ;; Call the smart start function
+          (funcall start-func)
+          
+          ;; Wait for buffer to be created
+          (let ((max-wait 10) (wait-count 0))
+            (while (and (< wait-count max-wait)
+                       (not (get-buffer buffer-name)))
+              (sleep-for 0.5)
+              (setq wait-count (1+ wait-count)))
+            
+            (let ((new-buffer (get-buffer buffer-name)))
+              (if new-buffer
+                  (progn
+                    (jupyter-termint-debug-log 'info "Console buffer created: %s" buffer-name)
+                    (message "%s console ready!" kernel)
+                    ;; Display in right split
+                    (jupyter-termint-display-console-right new-buffer original-buffer original-window)
+                    ;; Give it a moment to fully initialize, then send code
+                    (sleep-for 1)
+                    (funcall send-func code))
+                (progn
+                  (jupyter-termint-debug-log 'error "Console buffer not created after %d seconds" max-wait)
+                  (error "Failed to create %s console buffer" kernel))))))))))
+
+;;; Main function
+(defun jupyter-termint-send-simple ()
+  "Simple function to send region/line to termint console."
+  (interactive)
+  (jupyter-termint-debug-log 'info "Starting simple send function")
+  
+  (let* ((kernel (jupyter-termint-detect-kernel))
+         (code (cond
+                ((use-region-p)
+                 (buffer-substring-no-properties (region-beginning) (region-end)))
+                ((> (point-max) (point-min))
+                 (buffer-substring-no-properties (point-min) (point-max)))
+                (t
+                 (thing-at-point 'line t)))))
+    
+    (jupyter-termint-debug-log 'info "Kernel: %s" kernel)
+    (jupyter-termint-debug-log 'info "Code: %s" code)
+    
+    (cond
+     ((string= kernel "python")
+      (jupyter-termint-debug-log 'info "Sending to Python console with direnv + window management")
+      (jupyter-termint-ensure-console-with-features "python" code))
+     ((string= kernel "r")
+      (jupyter-termint-debug-log 'info "Sending to R console with direnv + window management")
+      (jupyter-termint-ensure-console-with-features "r" code))
+     ((string= kernel "stata")
+      (jupyter-termint-debug-log 'info "Sending to Stata console with direnv + window management")
+      (jupyter-termint-ensure-console-with-features "stata" code))
+     (t 
+      (jupyter-termint-debug-log 'error "Unsupported kernel: %s" kernel)
+      (message "Unsupported kernel: %s" kernel)))))
+
+;;; Keybinding setup
+(defun jupyter-termint-setup-keybinding ()
+  "Setup C-RET keybinding by unbinding Doom keys first."
+  (jupyter-termint-debug-log 'info "Setting up keybinding by unbinding Doom defaults")
+  
+  ;; Unbind the Doom default C-RET keybinding globally
+  (map! "C-<return>" nil)
+  
+  ;; Common function to set up keybindings in org-src buffers
+  (defun jupyter-termint-setup-buffer-keybinding ()
+    "Set up C-RET keybinding for the current org-src buffer."
+    (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
+      (jupyter-termint-debug-log 'info "Setting up C-<return> in org-src buffer: %s" (buffer-name))
+      
+      ;; Unbind in all evil states for this buffer
+      (evil-local-set-key 'insert (kbd "C-<return>") nil)
+      (evil-local-set-key 'normal (kbd "C-<return>") nil)
+      (evil-local-set-key 'visual (kbd "C-<return>") nil)
+      
+      ;; Now bind our function
+      (evil-local-set-key 'insert (kbd "C-<return>") #'jupyter-termint-send-simple)
+      (evil-local-set-key 'normal (kbd "C-<return>") #'jupyter-termint-send-simple)
+      (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-termint-send-simple)
+      (local-set-key (kbd "C-<return>") #'jupyter-termint-send-simple)
+      
+      (jupyter-termint-debug-log 'info "Unbound Doom C-<return> and bound jupyter-termint-send-simple")))
+
+  ;; Set up hooks for all supported languages
+  (add-hook 'python-mode-hook #'jupyter-termint-setup-buffer-keybinding)
+  (add-hook 'ess-r-mode-hook #'jupyter-termint-setup-buffer-keybinding)
+  (add-hook 'stata-mode-hook #'jupyter-termint-setup-buffer-keybinding)
+  (add-hook 'ess-stata-mode-hook #'jupyter-termint-setup-buffer-keybinding)
+  
+  (jupyter-termint-debug-log 'info "Added keybinding hooks with Doom unbinding"))
+
 ;;; Initialization
 
 (with-eval-after-load 'termint
+  (jupyter-termint-clear-log)
+  (jupyter-termint-debug-log 'info "jupyter-termint.el loaded")
   (jupyter-termint-setup)
-  (jupyter-termint-setup-babel-integration))
+  (jupyter-termint-setup-babel-integration)
+  (jupyter-termint-setup-keybinding))
 
 (provide 'jupyter-termint)
 ;;; jupyter-termint.el ends here

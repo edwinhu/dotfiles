@@ -8,10 +8,7 @@
                        (or (bound-and-true-p doom-user-dir)
                           (expand-file-name "~/.doom.d/"))))
 
-;; Load termint-org-src module for C-RET functionality in org-src edit buffers
-(load (expand-file-name "termint-org-src-fixed.el" 
-                       (or (bound-and-true-p doom-user-dir)
-                          (expand-file-name "~/.doom.d/"))))
+;; C-RET functionality is now integrated into jupyter-termint.el
 
 ;; Define function to find pixi jupyter executable
 (defun find-pixi-jupyter ()
