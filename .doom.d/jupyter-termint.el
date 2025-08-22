@@ -507,18 +507,30 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
      (t text-result))))
 
 (defun jupyter-termint-display-image-inline (image-file buffer)
-  "Display IMAGE-FILE inline or in side window for vterm buffers."
+  "Display IMAGE-FILE using EIN-style inline insertion with fallback."
   (when (and image-file (file-exists-p image-file))
-    ;; For vterm buffers, images don't render properly inline
-    ;; Use side window display with buffer notification
     (with-current-buffer buffer
-      (let ((inhibit-read-only t))
+      (let ((inhibit-read-only t)
+            (buffer-undo-list t))
         (goto-char (point-max))
-        (insert (format "\n📊 [Image generated: %s]\n" (file-name-nondirectory image-file)))
-        (goto-char (point-max))))
-    
-    ;; Display image in side window for better vterm compatibility
-    (jupyter-termint-display-image-side-window image-file buffer)))
+        (insert "\n")
+        ;; Use EIN-style image insertion with fallback text
+        (let ((image (create-image image-file nil nil :max-width 600 :max-height 400)))
+          (condition-case err
+              (progn
+                ;; Insert actual image object with fallback text - this is the key EIN approach
+                (insert-image image (format "[📊 %s]" (file-name-nondirectory image-file)))
+                (insert "\n"))
+            (error 
+             ;; If image insertion fails completely, insert text placeholder
+             (insert (format "[📊 %s - display failed: %s]\n" 
+                           (file-name-nondirectory image-file)
+                           (error-message-string err))))))
+        (goto-char (point-max))
+        
+        ;; Also display in side window for better viewing if preferred  
+        (when jupyter-termint-inline-images
+          (jupyter-termint-display-image-side-window image-file buffer)))))
 
 (defun jupyter-termint-display-image-side-window (image-file buffer)
   "Display IMAGE-FILE in a dedicated side window for vterm compatibility."
