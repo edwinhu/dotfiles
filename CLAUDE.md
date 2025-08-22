@@ -83,6 +83,25 @@ dotfiles/
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
 
+### Claude Code Integration
+
+- **Screenshots**: Always resize screenshots to below 2000 pixels before uploading to Claude to avoid API errors
+- When taking screenshots for debugging/verification, use tools like `convert` or `sips` to resize: `sips -Z 1900 screenshot.png`
+
+### Screenshots and Screen Capture
+
+- **Emacs window screenshots**: Use the window ID approach for precise captures:
+  ```bash
+  # Method 1: Get window ID and capture
+  screencapture -l $(osascript -e 'tell application "Emacs" to get the id of the front window') screenshot.png
+  
+  # Method 2: Activate Emacs first, then capture window
+  osascript -e 'tell application "Emacs" to activate'
+  screencapture -w screenshot.png
+  ```
+- The window ID method (`-l`) is more reliable for automated screenshots
+- The window selection method (`-w`) is better for interactive use
+
 ## Emacs Configuration Protocol (CRITICAL)
 
 When configuring Emacs/Doom, follow this **mandatory workflow** in order:
