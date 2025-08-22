@@ -12,16 +12,6 @@
 (require 'ob)
 (require 'org-src)
 
-;;; File-based logging for debugging
-(defvar jupyter-termint-debug-log-file (expand-file-name "jupyter-termint-debug.log" "~/"))
-
-(defun jupyter-termint-debug-log (level format-string &rest args)
-  "Log with timestamp to file."
-  (let ((message (apply #'format format-string args))
-        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
-    (with-temp-buffer
-      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
-      (append-to-file (point-min) (point-max) jupyter-termint-debug-log-file))))
 
 (defgroup jupyter-termint nil
   "Jupyter console integration using termint and vterm."
@@ -166,17 +156,14 @@ graph export \"%s\", replace"
 (defun jupyter-termint--check-direnv-allowed (directory)
   "Check if direnv is already allowed for DIRECTORY.
 Returns t if allowed, nil otherwise."
-  (jupyter-termint-debug-log 'info "Checking direnv status for directory: %s" directory)
   (when (and (boundp 'envrc-direnv-executable) envrc-direnv-executable)
     (let* ((default-directory directory)
            (status-output (with-temp-buffer
                            (when (zerop (call-process envrc-direnv-executable nil t nil "status"))
                              (buffer-string)))))
-      (jupyter-termint-debug-log 'debug "Direnv status output: %s" (or status-output "nil"))
       (let ((allowed (and status-output
                           (string-match-p "Found RC allowPath" status-output)
                           t))) ; Force boolean return value
-        (jupyter-termint-debug-log 'info "Direnv allowed status for %s: %s" directory allowed)
         allowed))))
 
 (defun jupyter-termint--build-smart-command (project-dir base-command)
@@ -188,17 +175,14 @@ Otherwise, use normal cd command (which may prompt)."
                      (format "sh -c 'cd %s && direnv exec . %s'" project-dir base-command)
                    ;; Not allowed yet - use normal cd (may prompt user)
                    (format "sh -c 'cd %s && %s'" project-dir base-command))))
-    (jupyter-termint-debug-log 'info "Built command for %s: %s" project-dir command)
     command))
 
 (defun jupyter-termint-setup ()
   "Set up termint definitions for Jupyter kernels."
   (message "jupyter-termint: Setting up termint definitions")
-  (jupyter-termint-debug-log 'info "Starting jupyter-termint setup")
   
   ;; Configure termint backend
   (setq termint-backend 'vterm)
-  (jupyter-termint-debug-log 'info "Set termint backend to vterm")
   
   ;; Find the best jupyter executable path
   (let ((jupyter-path (or (executable-find "jupyter")
@@ -207,12 +191,10 @@ Otherwise, use normal cd command (which may prompt)."
                           (when (file-executable-p "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
                             "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter"))))
     
-    (jupyter-termint-debug-log 'info "Found jupyter path: %s" (or jupyter-path "nil"))
     
     (if jupyter-path
         (progn
           (message "jupyter-termint: Using jupyter at: %s" jupyter-path)
-          (jupyter-termint-debug-log 'info "Using jupyter at: %s" jupyter-path)
           
           ;; Define termint sessions with smart direnv handling
           (let ((pixi-project-dir "/Users/vwh7mb/projects/wander2"))
@@ -220,168 +202,47 @@ Otherwise, use normal cd command (which may prompt)."
             (if (jupyter-termint--check-direnv-allowed pixi-project-dir)
                 (progn
                   (message "jupyter-termint: Direnv already allowed for %s - using direnv exec" pixi-project-dir)
-                  (jupyter-termint-debug-log 'info "Direnv already allowed - will use direnv exec"))
+                  nil))
               (progn
                 (message "jupyter-termint: Direnv not yet allowed for %s - may prompt on first run" pixi-project-dir)
-                (jupyter-termint-debug-log 'warn "Direnv not yet allowed - may prompt user")))
+                nil))
             
             ;; Build smart commands with direnv handling
             (let ((python-cmd (jupyter-termint--build-smart-command 
                               pixi-project-dir 
-                              "pixi run jupyter console --kernel python3"))
+                              "pixi run jupyter console --kernel python3 --simple-prompt"))
                   (r-cmd (jupyter-termint--build-smart-command 
                          pixi-project-dir 
-                         "pixi run jupyter console --kernel ir"))
-                  (stata-cmd (format "%s console --kernel stata" jupyter-path)))
+                         "pixi run jupyter console --kernel ir --simple-prompt"))
+                  (stata-cmd (format "%s console --kernel stata --simple-prompt" jupyter-path)))
               
               ;; Define Python Jupyter console with smart direnv handling
               (termint-define "jupyter-python" python-cmd
                               :bracketed-paste-p t)
-              (jupyter-termint-debug-log 'info "Defined Python console with command: %s" python-cmd)
               
               ;; Define R Jupyter console with smart direnv handling
               (termint-define "jupyter-r" r-cmd
                               :bracketed-paste-p t)
-              (jupyter-termint-debug-log 'info "Defined R console with command: %s" r-cmd)
               
               ;; Define Stata Jupyter console
               (termint-define "jupyter-stata" stata-cmd
                               :bracketed-paste-p t)
-              (jupyter-termint-debug-log 'info "Defined Stata console with command: %s" stata-cmd))))
+              nil)))
       
       (progn
         (message "jupyter-termint: ERROR - No jupyter executable found. Check your PATH or pixi environment.")
-        (jupyter-termint-debug-log 'error "No jupyter executable found"))))
+        nil))))
   
   (message "jupyter-termint: Termint definitions completed")
-  (jupyter-termint-debug-log 'info "Jupyter-termint setup completed"))
+  nil)
 
 ;;; Org-babel Integration
-
-;; Output capture functions for vterm buffers
-(defun jupyter-termint-wait-for-prompt (buffer &optional timeout)
-  "Wait for a jupyter prompt to appear in vterm BUFFER.
-TIMEOUT defaults to 5 seconds for vterm as it may be slower."
-  (let ((timeout (or timeout 5))
-        (start-time (current-time))
-        (prompt-regexp "In \\[[0-9]+\\]: \\|>>> \\|\\.\\.\\. \\|> \\|\\.\\.\\.\\.")
-        (initial-point nil)
-        (output-received nil))
-    (with-current-buffer buffer
-      (goto-char (point-max))
-      (setq initial-point (point))
-      ;; Wait for new output and a prompt
-      (while (and (< (time-to-seconds (time-subtract (current-time) start-time)) timeout)
-                  (progn
-                    (goto-char (point-max))
-                    ;; Check if we got output
-                    (when (> (point) initial-point)
-                      (setq output-received t))
-                    ;; Keep waiting if we haven't seen a prompt yet
-                    (if output-received
-                        ;; Got output, wait a bit for prompt or more output
-                        (not (looking-back prompt-regexp 
-                                          (max (point-min) (- (point) 200))))
-                      ;; No output yet, keep waiting
-                      t)))
-        (sit-for 0.1))
-      ;; Return true if we found a prompt or got output
-      (or (looking-back prompt-regexp (max (point-min) (- (point) 200)))
-          output-received))))
-
-(defun jupyter-termint-extract-output (raw-output code)
-  "Extract clean output from RAW-OUTPUT, removing CODE echo and prompts."
-  (let ((output raw-output))
-    ;; Remove ANSI escape sequences first
-    (setq output (replace-regexp-in-string "\033\\[[0-9;]*m" "" output))
-    
-    ;; Split into lines for better processing
-    (let ((lines (split-string output "\n"))
-          (code-lines (split-string code "\n"))
-          (result-lines '())
-          (in-output nil)
-          (seen-current-code nil))
-      
-      ;; Process each line
-      (dolist (line lines)
-        (let ((trimmed-line (string-trim line)))
-          (cond
-           ;; Skip startup messages and info
-           ((string-match-p "Type 'copyright'\\|IPython\\|enhanced Interactive\\|Tip: Use\\|\\] *$" line)
-            nil)
-           
-           ;; Skip prompts and continuation lines
-           ((string-match-p "^In \\[[0-9]+\\]: *$\\|^>>> *$\\|^\\.\\.\\. *$\\|^   \\.\\.\\.: *$" line)
-            nil)
-           
-           ;; Check if this line matches our code (start of our execution)
-           ((and (not seen-current-code)
-                 (cl-some (lambda (code-line)
-                           (and (not (string-empty-p (string-trim code-line)))
-                                (string-match-p (regexp-quote (string-trim code-line)) trimmed-line)))
-                         code-lines))
-            (setq seen-current-code t)
-            (setq in-output t))
-           
-           ;; If we've seen our code, start collecting output
-           ((and seen-current-code in-output (not (string-empty-p trimmed-line)))
-            ;; Skip lines that are just our code echoed back
-            (unless (cl-some (lambda (code-line)
-                              (and (not (string-empty-p (string-trim code-line)))
-                                   (string= (string-trim code-line) trimmed-line)))
-                            code-lines)
-              (push trimmed-line result-lines))))))
-      
-      ;; Join the result lines
-      (let ((clean-output (string-join (reverse result-lines) "\n")))
-        (setq clean-output (string-trim clean-output))
-        
-        ;; If we have any output after cleaning, return it
-        (if (and clean-output (not (string-empty-p clean-output)))
-            clean-output
-          nil)))))
-
-(defun jupyter-termint-send-string-with-output (buffer code)
-  "Send CODE to vterm BUFFER and capture the output."
-  (jupyter-termint-debug-log 'info "Sending code to %s for output capture" buffer)
-  
-  (with-current-buffer buffer
-    ;; Make sure we're at the end
-    (goto-char (point-max))
-    
-    ;; Mark where we are before sending
-    (let ((output-start (point-marker)))
-      
-      ;; Send the code using termint's send function
-      (let ((send-func (cond
-                       ((string-match-p "python" buffer) 'termint-jupyter-python-send-string)
-                       ((string-match-p "r" buffer) 'termint-jupyter-r-send-string)
-                       ((string-match-p "stata" buffer) 'termint-jupyter-stata-send-string)
-                       (t (error "Unknown buffer type: %s" buffer)))))
-        (when (fboundp send-func)
-          (funcall send-func code)))
-      
-      ;; Wait for output with longer timeout for vterm
-      (jupyter-termint-wait-for-prompt buffer 8)
-      
-      ;; Get everything between our mark and the current position
-      (goto-char (point-max))
-      (let* ((output-end (point))
-             (raw-output (buffer-substring-no-properties output-start output-end)))
-        
-        (jupyter-termint-debug-log 'debug "Raw output captured: %s" raw-output)
-        
-        ;; Extract the actual result
-        (let ((clean-output (jupyter-termint-extract-output raw-output code)))
-          (jupyter-termint-debug-log 'debug "Clean output: %s" clean-output)
-          clean-output)))))
 
 (defun jupyter-termint-execute-python (body params)
   "Execute Python BODY with PARAMS using termint jupyter."
   (message "jupyter-termint: Executing Python code block")
   (let* ((has-graphics (jupyter-termint-detect-graphics-code body "python3"))
-         (results-assoc (assq :results params))
-         (results-type (when results-assoc (cdr results-assoc)))
+         (results-type (cdr (assq :results params)))
          (image-file (when (and has-graphics (string-match-p "file" (or results-type "")))
                        (jupyter-termint-generate-image-filename "python3")))
          (final-code (if image-file
@@ -392,37 +253,24 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
       (message "jupyter-termint: Generating plot%s..." 
                (if image-file (format " to %s" image-file) "")))
     
-    ;; Execute code and capture output
-    (if image-file
-        ;; Graphics mode - send to console and return image file
-        (progn
-          (termint-jupyter-python-send-string final-code)
-          (when has-graphics
-            (message "jupyter-termint: Python execution completed%s"
-                     (if image-file " - plot saved" "")))
-          ;; Return image file path for :results file
-          (if (file-exists-p image-file)
-              image-file
-            nil))
-      ;; Text mode - send code and capture output
-      (progn
-        (message "jupyter-termint: Executing Python code for text output...")
-        ;; Ensure console is running first
-        (jupyter-termint-ensure-console-with-features "python" "")
-        ;; Send code to console and capture output
-        (let ((result (jupyter-termint-send-string-with-output "*jupyter-python*" final-code)))
-          (message "jupyter-termint: Python execution completed with result")
-          (message "jupyter-termint: Returning result: '%s'" result)
-          (message "jupyter-termint: Result type: %s, length: %d" (type-of result) (length result))
-          result)))))
+    ;; Send code to termint jupyter-python
+    (termint-jupyter-python-send-string final-code)
+    
+    (when has-graphics
+      (message "jupyter-termint: Python execution completed%s"
+               (if image-file " - plot saved" "")))
+    
+    ;; Return image file path for :results file, or test text output
+    (if (and image-file (file-exists-p image-file))
+        image-file
+      ;; For now, return a simple test string to see if results work
+      "Test Python output\nSecond line")))
 
 (defun jupyter-termint-execute-r (body params)
   "Execute R BODY with PARAMS using termint jupyter."
   (message "jupyter-termint: Executing R code block")
-  (message "jupyter-termint: R params = %S" params)
   (let* ((has-graphics (jupyter-termint-detect-graphics-code body "ir"))
-         (results-assoc (assq :results params))
-         (results-type (when results-assoc (cdr results-assoc)))
+         (results-type (cdr (assq :results params)))
          (image-file (when (and has-graphics (string-match-p "file" (or results-type "")))
                        (jupyter-termint-generate-image-filename "r")))
          (final-code (if image-file
@@ -433,36 +281,23 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
       (message "jupyter-termint: Generating plot%s..." 
                (if image-file (format " to %s" image-file) "")))
     
-    ;; Execute code and capture output
-    (if image-file
-        ;; Graphics mode - send to console and return image file
-        (progn
-          (termint-jupyter-r-send-string final-code)
-          (when has-graphics
-            (message "jupyter-termint: R execution completed%s"
-                     (if image-file " - plot saved" "")))
-          ;; Return image file path for :results file
-          (if (file-exists-p image-file)
-              image-file
-            nil))
-      ;; Text mode - send code and capture output
-      (progn
-        (message "jupyter-termint: Executing R code for text output...")
-        ;; Ensure console is running first
-        (jupyter-termint-ensure-console-with-features "r" "")
-        ;; Send code to console and capture output
-        (let ((result (jupyter-termint-send-string-with-output "*jupyter-r*" final-code)))
-          (message "jupyter-termint: R execution completed with result")
-          (message "jupyter-termint: R Returning result: '%s'" result)
-          (message "jupyter-termint: R Result type: %s, length: %d" (type-of result) (length result))
-          result)))))
+    ;; Send code to termint jupyter-r
+    (termint-jupyter-r-send-string final-code)
+    
+    (when has-graphics
+      (message "jupyter-termint: R execution completed%s"
+               (if image-file " - plot saved" "")))
+    
+    ;; Return image file path for :results file
+    (if (and image-file (file-exists-p image-file))
+        image-file
+      nil)))
 
 (defun jupyter-termint-execute-stata (body params)
   "Execute Stata BODY with PARAMS using termint jupyter."
   (message "jupyter-termint: Executing Stata code block")
   (let* ((has-graphics (jupyter-termint-detect-graphics-code body "stata"))
-         (results-assoc (assq :results params))
-         (results-type (when results-assoc (cdr results-assoc)))
+         (results-type (cdr (assq :results params)))
          (image-file (when (and has-graphics (string-match-p "file" (or results-type "")))
                        (jupyter-termint-generate-image-filename "stata")))
          (final-code (if image-file
@@ -473,48 +308,137 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
       (message "jupyter-termint: Generating plot%s..." 
                (if image-file (format " to %s" image-file) "")))
     
-    ;; Execute code and capture output
-    (if image-file
-        ;; Graphics mode - send to console and return image file
-        (progn
-          (termint-jupyter-stata-send-string final-code)
-          (when has-graphics
-            (message "jupyter-termint: Stata execution completed%s"
-                     (if image-file " - plot saved" "")))
-          ;; Return image file path for :results file
-          (if (file-exists-p image-file)
-              image-file
-            nil))
-      ;; Text mode - send code and capture output
+    ;; Send code to termint jupyter-stata
+    (termint-jupyter-stata-send-string final-code)
+    
+    (when has-graphics
+      (message "jupyter-termint: Stata execution completed%s"
+               (if image-file " - plot saved" "")))
+    
+    ;; Return image file path for :results file
+    (if (and image-file (file-exists-p image-file))
+        image-file
+      nil)))
+
+;;; Buffer management functions
+
+(defun jupyter-termint-get-or-create-buffer (kernel)
+  "Get or create termint buffer for KERNEL."
+  (let* ((buffer-name (cond
+                      ((string= kernel "python") "*jupyter-python*")
+                      ((string= kernel "R") "*jupyter-r*") 
+                      ((string= kernel "stata") "*jupyter-stata*")
+                      (t (error "Unsupported kernel: %s" kernel))))
+         (start-func (cond
+                     ((string= kernel "python") #'jupyter-termint-smart-python-start)
+                     ((string= kernel "R") #'jupyter-termint-smart-r-start)
+                     ((string= kernel "stata") #'jupyter-termint-smart-stata-start)))
+         (buffer (get-buffer buffer-name)))
+    
+    ;; Check if buffer exists and has live process
+    (if (and buffer 
+             (buffer-live-p buffer)
+             (get-buffer-process buffer)
+             (process-live-p (get-buffer-process buffer)))
+        buffer
+      ;; Need to start new console
       (progn
-        (message "jupyter-termint: Executing Stata code for text output...")
-        ;; Ensure console is running first
-        (jupyter-termint-ensure-console-with-features "stata" "")
-        ;; Send code to console and capture output
-        (let ((result (jupyter-termint-send-string-with-output "*jupyter-stata*" final-code)))
-          (message "jupyter-termint: Stata execution completed with result")
-          result)))))
+        (funcall start-func)
+        (get-buffer buffer-name)))))
 
-;;; Override org-babel functions
+;;; Output capture functions
 
-(defun jupyter-termint-setup-babel-integration ()
-  "Setup jupyter-termint org-babel integration."
-  (message "jupyter-termint: Setting up babel integration")
+(defun jupyter-termint-wait-for-prompt (buffer &optional timeout)
+  "Wait for command prompt to appear in BUFFER with optional TIMEOUT."
+  (let ((timeout (or timeout 5))
+        (start-time (current-time)))
+    (with-current-buffer buffer
+      (while (and (< (float-time (time-subtract (current-time) start-time)) timeout)
+                  (not (save-excursion
+                         (goto-char (point-max))
+                         (beginning-of-line)
+                         (looking-at-p "\\(In \\[[0-9]+\\]:\\|>>>\\|>\\|\\.\\.\\.\\) *$"))))
+        (accept-process-output nil 0.1)))))
+
+(defun jupyter-termint-extract-output (raw-output code)
+  "Extract clean output from RAW-OUTPUT, removing CODE echo and prompts."
+  (let ((output raw-output))
+    
+    ;; Simple approach: find the last occurrence of our code and extract what follows
+    (let ((first-line (car (split-string code "\n"))))
+      ;; Find last occurrence of "In [n]: first-line"  
+      (when (string-match (concat ".*In \\[[0-9]+\\]: " (regexp-quote first-line)) output)
+        ;; Get everything after the code execution
+        (setq output (substring output (match-end 0)))
+        
+        ;; Remove continuation lines (lines with "   ...: ")
+        (setq output (replace-regexp-in-string "^.*\\.\\.\\.:.*\n?" "" output))
+        
+        ;; Remove next prompt and everything after
+        (when (string-match "In \\[[0-9]+\\]:" output)
+          (setq output (substring output 0 (match-beginning 0))))
+        
+        ;; Clean whitespace
+        (setq output (replace-regexp-in-string "^[ \t\n]+" "" output))
+        (setq output (replace-regexp-in-string "[ \t\n]+$" "" output))))
+    
+    
+    ;; Return cleaned output or nil if empty
+    (if (and output (not (string-match-p "^[ \t\n]*$" output)))
+        output
+      nil)))
+
+(defun jupyter-termint-send-string-with-output (buffer code kernel)
+  "Send CODE to termint BUFFER for KERNEL and capture output."
   
-  ;; Override org-babel functions to use termint
-  (defun org-babel-execute:python (body params)
-    "Execute Python BODY with PARAMS using jupyter-termint."
-    (jupyter-termint-execute-python body params))
-  
-  (defun org-babel-execute:R (body params)
-    "Execute R BODY with PARAMS using jupyter-termint."
-    (jupyter-termint-execute-r body params))
-  
-  (defun org-babel-execute:stata (body params)
-    "Execute Stata BODY with PARAMS using jupyter-termint."
-    (jupyter-termint-execute-stata body params))
-  
-  (message "jupyter-termint: Babel integration setup complete"))
+  (with-current-buffer buffer
+    (let ((proc (get-buffer-process buffer)))
+      (unless proc
+        (error "No process in buffer %s" (buffer-name buffer)))
+      
+      ;; Move to end and mark position  
+      (goto-char (point-max))
+      (let ((output-start (point-marker))
+            (send-func (cond
+                       ((string= kernel "python") #'termint-jupyter-python-send-string)
+                       ((string= kernel "R") #'termint-jupyter-r-send-string)
+                       ((string= kernel "stata") #'termint-jupyter-stata-send-string)
+                       (t (error "Unsupported kernel: %s" kernel)))))
+        
+        ;; Send the code using kernel-specific function
+        (funcall send-func code)
+        
+        ;; Wait for completion
+        (jupyter-termint-wait-for-prompt buffer 10)
+        
+        ;; Extract output
+        (goto-char (point-max))
+        (let* ((output-end (point))
+               (raw-output (buffer-substring-no-properties output-start output-end)))
+          
+          ;; Extract clean result
+          (jupyter-termint-extract-output raw-output code))))))
+
+;;; Org-babel functions (defined directly like jupyter-console.el)
+;; These functions override any default org-babel functions
+
+(defun org-babel-execute:python (body params)
+  "Execute Python BODY with PARAMS using jupyter-termint."
+  (let* ((buffer (jupyter-termint-get-or-create-buffer "python")))
+    (let ((result (jupyter-termint-send-string-with-output buffer body "python")))
+      (or result ""))))
+
+(defun org-babel-execute:R (body params)
+  "Execute R BODY with PARAMS using jupyter-termint."
+  (let* ((buffer (jupyter-termint-get-or-create-buffer "R")))
+    (let ((result (jupyter-termint-send-string-with-output buffer body "R")))
+      (or result ""))))
+
+(defun org-babel-execute:stata (body params)
+  "Execute Stata BODY with PARAMS using jupyter-termint."
+  (let* ((buffer (jupyter-termint-get-or-create-buffer "stata")))
+    (let ((result (jupyter-termint-send-string-with-output buffer body "stata")))
+      (or result ""))))
 
 ;;; Allow risky local variables to be remembered permanently
 ;; This fixes direnv permission prompts by allowing Emacs to remember
@@ -523,97 +447,69 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
 
 ;;; C-RET org-src Integration
 
-(defun jupyter-termint-clear-log ()
-  "Clear the debug log file."
-  (with-temp-buffer
-    (write-file jupyter-termint-debug-log-file)))
-
 ;;; Language detection
 (defun jupyter-termint-detect-kernel ()
   "Detect kernel from org-src buffer language."
   (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
                                  (match-string 1 (buffer-name))))
         (lang-from-variable (bound-and-true-p org-src--lang)))
-    (jupyter-termint-debug-log 'debug "Buffer name: %s" (buffer-name))
-    (jupyter-termint-debug-log 'debug "Language from buffer name: %s" lang-from-buffer-name)
-    (jupyter-termint-debug-log 'debug "Language from org-src--lang: %s" lang-from-variable)
-    (jupyter-termint-debug-log 'debug "Major mode: %s" major-mode)
     
     (let ((detected-lang (or lang-from-variable lang-from-buffer-name)))
       (cond
        ((or (equal detected-lang "python") (eq major-mode 'python-mode) (eq major-mode 'python-ts-mode)) "python")
        ((or (equal detected-lang "r") (equal detected-lang "R") (eq major-mode 'ess-r-mode)) "r") 
        ((or (equal detected-lang "stata") (eq major-mode 'stata-mode)) "stata")
-       (t (progn 
-            (jupyter-termint-debug-log 'info "Using fallback kernel: python")
-            "python"))))))
+       (t "python")))))
 
 ;;; Console management with all features
 (defun jupyter-termint-smart-python-start ()
   "Start Python jupyter console with smart direnv command."
   (interactive)
-  (jupyter-termint-debug-log 'info "Starting smart Python console with direnv")
   
   ;; Kill any existing hung buffer first
   (when (get-buffer "*jupyter-python*")
-    (jupyter-termint-debug-log 'info "Killing existing hung *jupyter-python* buffer")
     (let ((kill-buffer-query-functions nil))
       (kill-buffer "*jupyter-python*")))
   
   ;; Define and start with smart direnv command
-  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3'"))
-    (jupyter-termint-debug-log 'info "Defining termint with smart command: %s" smart-cmd)
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3 --simple-prompt'"))
     (termint-define "jupyter-python" smart-cmd :bracketed-paste-p t)
-    (jupyter-termint-debug-log 'info "Calling termint-jupyter-python-start...")
-    (termint-jupyter-python-start)
-    (jupyter-termint-debug-log 'info "Smart Python console started")))
+    (termint-jupyter-python-start)))
 
 (defun jupyter-termint-smart-r-start ()
   "Start R jupyter console with smart direnv command."
   (interactive)
-  (jupyter-termint-debug-log 'info "Starting smart R console with direnv")
   
   ;; Kill any existing hung buffer first
   (when (get-buffer "*jupyter-r*")
-    (jupyter-termint-debug-log 'info "Killing existing hung *jupyter-r* buffer")
     (let ((kill-buffer-query-functions nil))
       (kill-buffer "*jupyter-r*")))
   
   ;; Define and start with smart direnv command
-  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir'"))
-    (jupyter-termint-debug-log 'info "Defining termint with smart command: %s" smart-cmd)
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir --simple-prompt'"))
     (termint-define "jupyter-r" smart-cmd :bracketed-paste-p t)
-    (jupyter-termint-debug-log 'info "Calling termint-jupyter-r-start...")
-    (termint-jupyter-r-start)
-    (jupyter-termint-debug-log 'info "Smart R console started")))
+    (termint-jupyter-r-start)))
 
 (defun jupyter-termint-smart-stata-start ()
   "Start Stata jupyter console with smart direnv command."
   (interactive)
-  (jupyter-termint-debug-log 'info "Starting smart Stata console with direnv")
   
   ;; Kill any existing hung buffer first
   (when (get-buffer "*jupyter-stata*")
-    (jupyter-termint-debug-log 'info "Killing existing hung *jupyter-stata* buffer")
     (let ((kill-buffer-query-functions nil))
       (kill-buffer "*jupyter-stata*")))
   
   ;; Define and start with smart direnv command
-  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata'"))
-    (jupyter-termint-debug-log 'info "Defining termint with smart command: %s" smart-cmd)
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata --simple-prompt'"))
     (termint-define "jupyter-stata" smart-cmd :bracketed-paste-p t)
-    (jupyter-termint-debug-log 'info "Calling termint-jupyter-stata-start...")
-    (termint-jupyter-stata-start)
-    (jupyter-termint-debug-log 'info "Smart Stata console started")))
+    (termint-jupyter-stata-start)))
 
 (defun jupyter-termint-display-console-right (buffer &optional original-buffer original-window)
   "Display console BUFFER in a right split window, preserving focus on ORIGINAL-BUFFER in ORIGINAL-WINDOW."
-  (jupyter-termint-debug-log 'info "Displaying console in right split, preserving focus")
   
   (let ((initial-window (or original-window (selected-window)))
         (initial-buffer (or original-buffer (current-buffer))))
     
-    (jupyter-termint-debug-log 'info "Initial buffer: %s" (buffer-name initial-buffer))
     
     ;; Use display-buffer with specific parameters for right split
     (let ((console-window (display-buffer buffer
@@ -623,7 +519,6 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
                                             (window-width . 0.5)
                                             (inhibit-same-window . t)))))
       
-      (jupyter-termint-debug-log 'info "Console window created: %s" console-window)
       
       (when console-window
         ;; Briefly switch to console window to scroll to bottom
@@ -632,14 +527,12 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
         
         ;; Force restore focus to original window and buffer
         (when (window-live-p initial-window)
-          (jupyter-termint-debug-log 'info "Restoring focus to initial window")
           (select-window initial-window))
         
         (when (buffer-live-p initial-buffer)
-          (jupyter-termint-debug-log 'info "Restoring buffer to: %s" (buffer-name initial-buffer))
           (set-window-buffer (selected-window) initial-buffer))
         
-        (jupyter-termint-debug-log 'info "Focus restored to org-src buffer")))))
+        nil))))
 
 (defun jupyter-termint-ensure-console-with-features (kernel code)
   "Ensure console for KERNEL is running with direnv and window management, then send CODE."
@@ -658,9 +551,6 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
          (original-buffer (current-buffer))
          (original-window (selected-window)))
     
-    (jupyter-termint-debug-log 'info "Captured original state - Buffer: %s, Window: %s" 
-                              (buffer-name original-buffer) original-window)
-    (jupyter-termint-debug-log 'info "Checking for console buffer: %s" buffer-name)
     
     ;; Check if console buffer exists and has a live process
     (let ((console-buffer (get-buffer buffer-name)))
@@ -669,14 +559,12 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
                (get-buffer-process console-buffer)
                (process-live-p (get-buffer-process console-buffer)))
           (progn
-            (jupyter-termint-debug-log 'info "Console already running: %s" buffer-name)
             ;; Console exists, just display it and send code
             (jupyter-termint-display-console-right console-buffer original-buffer original-window)
             (funcall send-func code))
         
         ;; Console doesn't exist or is dead, start it
         (progn
-          (jupyter-termint-debug-log 'info "Starting new console for %s kernel" kernel)
           (message "Starting %s console with direnv..." kernel)
           
           ;; Call the smart start function
@@ -692,7 +580,6 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
             (let ((new-buffer (get-buffer buffer-name)))
               (if new-buffer
                   (progn
-                    (jupyter-termint-debug-log 'info "Console buffer created: %s" buffer-name)
                     (message "%s console ready!" kernel)
                     ;; Display in right split
                     (jupyter-termint-display-console-right new-buffer original-buffer original-window)
@@ -700,14 +587,12 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
                     (sleep-for 1)
                     (funcall send-func code))
                 (progn
-                  (jupyter-termint-debug-log 'error "Console buffer not created after %d seconds" max-wait)
                   (error "Failed to create %s console buffer" kernel))))))))))
 
 ;;; Main function
 (defun jupyter-termint-send-simple ()
   "Simple function to send region/line to termint console."
   (interactive)
-  (jupyter-termint-debug-log 'info "Starting simple send function")
   
   (let* ((kernel (jupyter-termint-detect-kernel))
          (code (cond
@@ -718,27 +603,20 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
                 (t
                  (thing-at-point 'line t)))))
     
-    (jupyter-termint-debug-log 'info "Kernel: %s" kernel)
-    (jupyter-termint-debug-log 'info "Code: %s" code)
     
     (cond
      ((string= kernel "python")
-      (jupyter-termint-debug-log 'info "Sending to Python console with direnv + window management")
       (jupyter-termint-ensure-console-with-features "python" code))
      ((string= kernel "r")
-      (jupyter-termint-debug-log 'info "Sending to R console with direnv + window management")
       (jupyter-termint-ensure-console-with-features "r" code))
      ((string= kernel "stata")
-      (jupyter-termint-debug-log 'info "Sending to Stata console with direnv + window management")
       (jupyter-termint-ensure-console-with-features "stata" code))
      (t 
-      (jupyter-termint-debug-log 'error "Unsupported kernel: %s" kernel)
       (message "Unsupported kernel: %s" kernel)))))
 
 ;;; Keybinding setup
 (defun jupyter-termint-setup-keybinding ()
   "Setup C-RET keybinding by unbinding Doom keys first."
-  (jupyter-termint-debug-log 'info "Setting up keybinding by unbinding Doom defaults")
   
   ;; Unbind the Doom default C-RET keybinding globally
   (map! "C-<return>" nil)
@@ -747,7 +625,6 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
   (defun jupyter-termint-setup-buffer-keybinding ()
     "Set up C-RET keybinding for the current org-src buffer."
     (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
-      (jupyter-termint-debug-log 'info "Setting up C-<return> in org-src buffer: %s" (buffer-name))
       
       ;; Unbind in all evil states for this buffer
       (evil-local-set-key 'insert (kbd "C-<return>") nil)
@@ -760,7 +637,7 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
       (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-termint-send-simple)
       (local-set-key (kbd "C-<return>") #'jupyter-termint-send-simple)
       
-      (jupyter-termint-debug-log 'info "Unbound Doom C-<return> and bound jupyter-termint-send-simple")))
+      nil)))
 
   ;; Set up hooks for all supported languages
   (add-hook 'python-mode-hook #'jupyter-termint-setup-buffer-keybinding)
@@ -768,15 +645,12 @@ TIMEOUT defaults to 5 seconds for vterm as it may be slower."
   (add-hook 'stata-mode-hook #'jupyter-termint-setup-buffer-keybinding)
   (add-hook 'ess-stata-mode-hook #'jupyter-termint-setup-buffer-keybinding)
   
-  (jupyter-termint-debug-log 'info "Added keybinding hooks with Doom unbinding"))
+  nil)
 
 ;;; Initialization
 
 (with-eval-after-load 'termint
-  (jupyter-termint-clear-log)
-  (jupyter-termint-debug-log 'info "jupyter-termint.el loaded")
   (jupyter-termint-setup)
-  (jupyter-termint-setup-babel-integration)
   (jupyter-termint-setup-keybinding))
 
 (provide 'jupyter-termint)
