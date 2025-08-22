@@ -465,6 +465,114 @@ Otherwise, use normal cd command (which may prompt)."
           ;; Extract clean result
           (jupyter-termint-extract-output raw-output code))))))
 
+;;; Enhanced Image Support Functions
+
+(defun jupyter-termint-send-string-with-images (buffer code kernel &optional image-file interactive)
+  "Enhanced execution that handles image generation.
+BUFFER is the jupyter console buffer, CODE is the code to execute, 
+KERNEL is the kernel type (python, R, stata).
+IMAGE-FILE is the optional specific file path to save the image to.
+INTERACTIVE determines if this is called from C-RET (affects display behavior)."
+  (let* ((detection-kernel (cond
+                           ((string= kernel "python") "python3")
+                           ((string= kernel "R") "ir") 
+                           ((string= kernel "stata") "stata")
+                           (t kernel)))
+         (has-graphics (jupyter-termint-detect-graphics-code code detection-kernel))
+         (target-file (or image-file 
+                         (when has-graphics (jupyter-termint-generate-image-filename detection-kernel))))
+         (modified-code (if has-graphics 
+                           (jupyter-termint-inject-image-code code detection-kernel target-file)
+                         code))
+         (text-result (jupyter-termint-send-string-with-output buffer modified-code kernel)))
+    
+    ;; Check if file was created with retry loop for graphics
+    (when (and has-graphics target-file)
+      (let ((max-wait 5) (wait-count 0) (file-found nil))
+        (while (and (< wait-count max-wait) (not file-found))
+          (sit-for 0.5)
+          (setq file-found (file-exists-p target-file))
+          (setq wait-count (1+ wait-count)))
+        
+        ;; For interactive use (C-RET), display the image
+        (when (and interactive file-found)
+          (jupyter-termint-display-image-in-buffer target-file buffer))))
+    
+    ;; Return appropriate result
+    (cond
+     ;; For org-babel with graphics, return the file path if it exists
+     ((and has-graphics target-file (not interactive) (file-exists-p target-file))
+      target-file)
+     ;; For interactive use or non-graphics, return text result
+     (t text-result))))
+
+(defun jupyter-termint-display-image-inline (image-file buffer)
+  "Display IMAGE-FILE inline or in side window for vterm buffers."
+  (when (and image-file (file-exists-p image-file))
+    ;; For vterm buffers, images don't render properly inline
+    ;; Use side window display with buffer notification
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format "\n📊 [Image generated: %s]\n" (file-name-nondirectory image-file)))
+        (goto-char (point-max))))
+    
+    ;; Display image in side window for better vterm compatibility
+    (jupyter-termint-display-image-side-window image-file buffer)))
+
+(defun jupyter-termint-display-image-side-window (image-file buffer)
+  "Display IMAGE-FILE in a dedicated side window for vterm compatibility."
+  (when (and image-file (file-exists-p image-file))
+    (let ((image-buffer (get-buffer-create "*Jupyter Image*"))
+          (original-window (selected-window)))
+      (with-current-buffer image-buffer
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (format "Generated from: %s\n\n" (buffer-name buffer)))
+          (let ((image (create-image image-file nil nil :max-width 600 :max-height 400)))
+            (insert-image image))
+          (insert (format "\n\n[%s]" (file-name-nondirectory image-file)))
+          (goto-char (point-min))
+          (read-only-mode 1)))
+      
+      ;; Display in side window, reusing existing window if available
+      (let ((image-window (get-buffer-window image-buffer)))
+        (if image-window
+            ;; Reuse existing window
+            (select-window image-window)
+          ;; Create new side window
+          (display-buffer image-buffer
+                          '((display-buffer-in-side-window)
+                            (side . right)
+                            (window-width . 0.4)
+                            (inhibit-same-window . t)))))
+      
+      ;; Return focus to original window
+      (when (window-live-p original-window)
+        (select-window original-window)))))
+
+(defun jupyter-termint-display-image-popup (image-file)
+  "Display IMAGE-FILE in a popup window."
+  (when (and image-file (file-exists-p image-file))
+    (let ((image-buffer (get-buffer-create "*Jupyter Termint Image*")))
+      (with-current-buffer image-buffer
+        (erase-buffer)
+        (insert-image (create-image image-file))
+        (goto-char (point-min))
+        (read-only-mode 1))
+      ;; Display in a popup window
+      (display-buffer image-buffer
+                      '((display-buffer-reuse-window
+                         display-buffer-pop-up-window)
+                        (window-height . 0.6)
+                        (window-width . 0.6))))))
+
+(defun jupyter-termint-display-image-in-buffer (image-file buffer)
+  "Display IMAGE-FILE either inline or in popup based on configuration."
+  (if jupyter-termint-inline-images
+      (jupyter-termint-display-image-inline image-file buffer)
+    (jupyter-termint-display-image-popup image-file)))
+
 ;;; Org-babel functions (defined directly like jupyter-console.el)
 ;; These functions override any default org-babel functions
 
@@ -473,9 +581,14 @@ Otherwise, use normal cd command (which may prompt)."
   (let ((current-window (selected-window))
         (current-buffer (current-buffer)))
     (unwind-protect
-        (let* ((buffer (jupyter-termint-get-or-create-buffer "python")))
-          (let ((result (jupyter-termint-send-string-with-output buffer body "python")))
-            (or result "")))
+        (let* ((buffer (jupyter-termint-get-or-create-buffer "python"))
+               (results-type (cdr (assq :results params)))
+               (has-graphics (jupyter-termint-detect-graphics-code body "python3")))
+          (if has-graphics
+              ;; For graphics code, use enhanced function 
+              (jupyter-termint-send-string-with-images buffer body "python" nil nil)
+            ;; For non-graphics code, use regular execution
+            (or (jupyter-termint-send-string-with-output buffer body "python") "")))
       ;; Always restore original window and buffer
       (when (window-live-p current-window)
         (select-window current-window))
@@ -487,9 +600,14 @@ Otherwise, use normal cd command (which may prompt)."
   (let ((current-window (selected-window))
         (current-buffer (current-buffer)))
     (unwind-protect
-        (let* ((buffer (jupyter-termint-get-or-create-buffer "R")))
-          (let ((result (jupyter-termint-send-string-with-output buffer body "R")))
-            (or result "")))
+        (let* ((buffer (jupyter-termint-get-or-create-buffer "R"))
+               (results-type (cdr (assq :results params)))
+               (has-graphics (jupyter-termint-detect-graphics-code body "ir")))
+          (if has-graphics
+              ;; For graphics code, use enhanced function
+              (jupyter-termint-send-string-with-images buffer body "R" nil nil)
+            ;; For non-graphics code, use regular execution
+            (or (jupyter-termint-send-string-with-output buffer body "R") "")))
       ;; Always restore original window and buffer
       (when (window-live-p current-window)
         (select-window current-window))
@@ -501,9 +619,14 @@ Otherwise, use normal cd command (which may prompt)."
   (let ((current-window (selected-window))
         (current-buffer (current-buffer)))
     (unwind-protect
-        (let* ((buffer (jupyter-termint-get-or-create-buffer "stata")))
-          (let ((result (jupyter-termint-send-string-with-output buffer body "stata")))
-            (or result "")))
+        (let* ((buffer (jupyter-termint-get-or-create-buffer "stata"))
+               (results-type (cdr (assq :results params)))
+               (has-graphics (jupyter-termint-detect-graphics-code body "stata")))
+          (if has-graphics
+              ;; For graphics code, use enhanced function
+              (jupyter-termint-send-string-with-images buffer body "stata" nil nil)
+            ;; For non-graphics code, use regular execution
+            (or (jupyter-termint-send-string-with-output buffer body "stata") "")))
       ;; Always restore original window and buffer
       (when (window-live-p current-window)
         (select-window current-window))
@@ -608,15 +731,14 @@ Otherwise, use normal cd command (which may prompt)."
   "Ensure console for KERNEL is running with direnv and window management, then send CODE."
   (let* ((kernel-config (cond
                         ((string= kernel "python")
-                         '("*jupyter-python*" jupyter-termint-smart-python-start termint-jupyter-python-send-string))
+                         '("*jupyter-python*" jupyter-termint-smart-python-start))
                         ((string= kernel "r")
-                         '("*jupyter-r*" jupyter-termint-smart-r-start termint-jupyter-r-send-string))
+                         '("*jupyter-r*" jupyter-termint-smart-r-start))
                         ((string= kernel "stata")
-                         '("*jupyter-stata*" jupyter-termint-smart-stata-start termint-jupyter-stata-send-string))
+                         '("*jupyter-stata*" jupyter-termint-smart-stata-start))
                         (t (error "Unsupported kernel: %s" kernel))))
          (buffer-name (nth 0 kernel-config))
          (start-func (nth 1 kernel-config))
-         (send-func (nth 2 kernel-config))
          ;; CRITICAL: Capture org-src buffer/window BEFORE any console operations
          (original-buffer (current-buffer))
          (original-window (selected-window)))
@@ -629,9 +751,10 @@ Otherwise, use normal cd command (which may prompt)."
                (get-buffer-process console-buffer)
                (process-live-p (get-buffer-process console-buffer)))
           (progn
-            ;; Console exists, just display it and send code
+            ;; Console exists, just display it and send code with image support
             (jupyter-termint-display-console-right console-buffer original-buffer original-window)
-            (funcall send-func code))
+            ;; Use enhanced send function with interactive=t for image display
+            (jupyter-termint-send-string-with-images console-buffer code kernel nil t))
         
         ;; Console doesn't exist or is dead, start it
         (progn
@@ -653,9 +776,10 @@ Otherwise, use normal cd command (which may prompt)."
                     (message "%s console ready!" kernel)
                     ;; Display in right split
                     (jupyter-termint-display-console-right new-buffer original-buffer original-window)
-                    ;; Give it a moment to fully initialize, then send code
+                    ;; Give it a moment to fully initialize, then send code with image support
                     (sleep-for 1)
-                    (funcall send-func code))
+                    ;; Use enhanced send function with interactive=t for image display
+                    (jupyter-termint-send-string-with-images new-buffer code kernel nil t))
                 (progn
                   (error "Failed to create %s console buffer" kernel))))))))))
 
