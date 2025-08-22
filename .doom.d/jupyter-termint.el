@@ -322,17 +322,57 @@ Otherwise, use normal cd command (which may prompt)."
 
 ;;; Buffer management functions
 
-(defun jupyter-termint-get-or-create-buffer (kernel)
-  "Get or create termint buffer for KERNEL."
+(defun jupyter-termint-silent-start (kernel)
+  "Silently start jupyter console for KERNEL without window switching."
   (let* ((buffer-name (cond
                       ((string= kernel "python") "*jupyter-python*")
                       ((string= kernel "R") "*jupyter-r*") 
                       ((string= kernel "stata") "*jupyter-stata*")
                       (t (error "Unsupported kernel: %s" kernel))))
-         (start-func (cond
-                     ((string= kernel "python") #'jupyter-termint-smart-python-start)
-                     ((string= kernel "R") #'jupyter-termint-smart-r-start)
-                     ((string= kernel "stata") #'jupyter-termint-smart-stata-start)))
+         (smart-cmd (cond
+                    ((string= kernel "python") 
+                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3 --simple-prompt'")
+                    ((string= kernel "R")
+                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir --simple-prompt'")
+                    ((string= kernel "stata")
+                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata --simple-prompt'")
+                    (t (error "Unsupported kernel: %s" kernel))))
+         (termint-name (cond
+                       ((string= kernel "python") "jupyter-python")
+                       ((string= kernel "R") "jupyter-r")
+                       ((string= kernel "stata") "jupyter-stata")
+                       (t (error "Unsupported kernel: %s" kernel))))
+         (current-window (selected-window))
+         (current-buffer (current-buffer)))
+    
+    ;; Kill any existing hung buffer first
+    (when (get-buffer buffer-name)
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buffer-name)))
+    
+    ;; Define and start with smart command
+    (termint-define termint-name smart-cmd :bracketed-paste-p t)
+    
+    ;; Start the console with display suppression
+    (let ((display-buffer-alist (cons '("\\*jupyter-.*\\*" display-buffer-no-window) display-buffer-alist)))
+      (cond
+       ((string= kernel "python") (termint-jupyter-python-start))
+       ((string= kernel "R") (termint-jupyter-r-start))
+       ((string= kernel "stata") (termint-jupyter-stata-start))))
+    
+    ;; Restore original window and buffer focus
+    (when (window-live-p current-window)
+      (select-window current-window))
+    (when (buffer-live-p current-buffer)
+      (set-window-buffer (selected-window) current-buffer))))
+
+(defun jupyter-termint-get-or-create-buffer (kernel)
+  "Get or create termint buffer for KERNEL without window switching."
+  (let* ((buffer-name (cond
+                      ((string= kernel "python") "*jupyter-python*")
+                      ((string= kernel "R") "*jupyter-r*") 
+                      ((string= kernel "stata") "*jupyter-stata*")
+                      (t (error "Unsupported kernel: %s" kernel))))
          (buffer (get-buffer buffer-name)))
     
     ;; Check if buffer exists and has live process
@@ -341,9 +381,15 @@ Otherwise, use normal cd command (which may prompt)."
              (get-buffer-process buffer)
              (process-live-p (get-buffer-process buffer)))
         buffer
-      ;; Need to start new console
+      ;; Need to start new console silently
       (progn
-        (funcall start-func)
+        (jupyter-termint-silent-start kernel)
+        ;; Wait a moment for buffer creation
+        (let ((max-wait 10) (wait-count 0))
+          (while (and (< wait-count max-wait)
+                     (not (get-buffer buffer-name)))
+            (sleep-for 0.5)
+            (setq wait-count (1+ wait-count))))
         (get-buffer buffer-name)))))
 
 ;;; Output capture functions
@@ -424,21 +470,45 @@ Otherwise, use normal cd command (which may prompt)."
 
 (defun org-babel-execute:python (body params)
   "Execute Python BODY with PARAMS using jupyter-termint."
-  (let* ((buffer (jupyter-termint-get-or-create-buffer "python")))
-    (let ((result (jupyter-termint-send-string-with-output buffer body "python")))
-      (or result ""))))
+  (let ((current-window (selected-window))
+        (current-buffer (current-buffer)))
+    (unwind-protect
+        (let* ((buffer (jupyter-termint-get-or-create-buffer "python")))
+          (let ((result (jupyter-termint-send-string-with-output buffer body "python")))
+            (or result "")))
+      ;; Always restore original window and buffer
+      (when (window-live-p current-window)
+        (select-window current-window))
+      (when (buffer-live-p current-buffer)
+        (set-window-buffer (selected-window) current-buffer)))))
 
 (defun org-babel-execute:R (body params)
   "Execute R BODY with PARAMS using jupyter-termint."
-  (let* ((buffer (jupyter-termint-get-or-create-buffer "R")))
-    (let ((result (jupyter-termint-send-string-with-output buffer body "R")))
-      (or result ""))))
+  (let ((current-window (selected-window))
+        (current-buffer (current-buffer)))
+    (unwind-protect
+        (let* ((buffer (jupyter-termint-get-or-create-buffer "R")))
+          (let ((result (jupyter-termint-send-string-with-output buffer body "R")))
+            (or result "")))
+      ;; Always restore original window and buffer
+      (when (window-live-p current-window)
+        (select-window current-window))
+      (when (buffer-live-p current-buffer)
+        (set-window-buffer (selected-window) current-buffer)))))
 
 (defun org-babel-execute:stata (body params)
   "Execute Stata BODY with PARAMS using jupyter-termint."
-  (let* ((buffer (jupyter-termint-get-or-create-buffer "stata")))
-    (let ((result (jupyter-termint-send-string-with-output buffer body "stata")))
-      (or result ""))))
+  (let ((current-window (selected-window))
+        (current-buffer (current-buffer)))
+    (unwind-protect
+        (let* ((buffer (jupyter-termint-get-or-create-buffer "stata")))
+          (let ((result (jupyter-termint-send-string-with-output buffer body "stata")))
+            (or result "")))
+      ;; Always restore original window and buffer
+      (when (window-live-p current-window)
+        (select-window current-window))
+      (when (buffer-live-p current-buffer)
+        (set-window-buffer (selected-window) current-buffer)))))
 
 ;;; Allow risky local variables to be remembered permanently
 ;; This fixes direnv permission prompts by allowing Emacs to remember
