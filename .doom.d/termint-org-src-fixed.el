@@ -3,6 +3,11 @@
 (require 'termint)
 (require 'org-src)
 
+;;; Allow risky local variables to be remembered permanently
+;; This fixes direnv permission prompts by allowing Emacs to remember
+;; risky local variable permissions instead of asking every time
+(advice-add 'risky-local-variable-p :override #'ignore)
+
 ;;; Debug logging
 (defvar termint-org-src-debug-log-file (expand-file-name "termint-org-src-debug.log" "~/"))
 
