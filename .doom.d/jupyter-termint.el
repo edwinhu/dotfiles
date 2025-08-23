@@ -1,20 +1,20 @@
-;;; jupyter-termint.el --- Jupyter console integration using termint and vterm -*- lexical-binding: t; -*-
+;;; jupyter-termint.el --- Jupyter console integration using termint and eat -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Jupyter console integration using termint.el with vterm backend
+;; Jupyter console integration using termint.el with eat backend
 ;; This replaces the comint-based approach to enable proper bracketed paste
 ;; and multi-line single-cell execution
 
 ;;; Code:
 
-(require 'termint)
+(require 'termint nil t)
 (require 'org)
 (require 'ob)
 (require 'org-src)
 
 
 (defgroup jupyter-termint nil
-  "Jupyter console integration using termint and vterm."
+  "Jupyter console integration using termint and eat."
   :group 'org-babel)
 
 (defcustom jupyter-termint-inline-images t
@@ -181,8 +181,8 @@ Otherwise, use normal cd command (which may prompt)."
   "Set up termint definitions for Jupyter kernels."
   (message "jupyter-termint: Setting up termint definitions")
   
-  ;; Configure termint backend
-  (setq termint-backend 'vterm)
+  ;; Configure termint backend - use eat for sixel support (vterm doesn't support sixel in Emacs)
+  (setq termint-backend 'eat)
   
   ;; Find the best jupyter executable path
   (let ((jupyter-path (or (executable-find "jupyter")
@@ -202,7 +202,7 @@ Otherwise, use normal cd command (which may prompt)."
             (if (jupyter-termint--check-direnv-allowed pixi-project-dir)
                 (progn
                   (message "jupyter-termint: Direnv already allowed for %s - using direnv exec" pixi-project-dir)
-                  nil))
+                  nil)
               (progn
                 (message "jupyter-termint: Direnv not yet allowed for %s - may prompt on first run" pixi-project-dir)
                 nil))
@@ -210,28 +210,32 @@ Otherwise, use normal cd command (which may prompt)."
             ;; Build smart commands with direnv handling
             (let ((python-cmd (jupyter-termint--build-smart-command 
                               pixi-project-dir 
-                              "pixi run jupyter console --kernel python3 --simple-prompt"))
+                              "pixi run jupyter console --kernel python3"))
                   (r-cmd (jupyter-termint--build-smart-command 
                          pixi-project-dir 
-                         "pixi run jupyter console --kernel ir --simple-prompt"))
-                  (stata-cmd (format "%s console --kernel stata --simple-prompt" jupyter-path)))
+                         "pixi run jupyter console --kernel ir"))
+                  (stata-cmd (format "%s console --kernel stata" jupyter-path)))
               
-              ;; Define Python Jupyter console with smart direnv handling
+              ;; Define Python Jupyter console with smart direnv handling (NO for sixel support)
               (termint-define "jupyter-python" python-cmd
-                              :bracketed-paste-p t)
+                              :bracketed-paste-p t
+                              :backend 'eat
+                              :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor")))
               
-              ;; Define R Jupyter console with smart direnv handling
+              ;; Define R Jupyter console with smart direnv handling (NO for IRdisplay support)
               (termint-define "jupyter-r" r-cmd
-                              :bracketed-paste-p t)
+                              :bracketed-paste-p t
+                              :backend 'eat
+                              :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor")))
               
               ;; Define Stata Jupyter console
               (termint-define "jupyter-stata" stata-cmd
                               :bracketed-paste-p t)
-              nil)))
+              nil))
       
       (progn
         (message "jupyter-termint: ERROR - No jupyter executable found. Check your PATH or pixi environment.")
-        nil))))
+        nil)))
   
   (message "jupyter-termint: Termint definitions completed")
   nil)
@@ -326,20 +330,20 @@ Otherwise, use normal cd command (which may prompt)."
   "Silently start jupyter console for KERNEL without window switching."
   (let* ((buffer-name (cond
                       ((string= kernel "python") "*jupyter-python*")
-                      ((string= kernel "R") "*jupyter-r*") 
+                      ((string= kernel "r") "*jupyter-r*") 
                       ((string= kernel "stata") "*jupyter-stata*")
                       (t (error "Unsupported kernel: %s" kernel))))
          (smart-cmd (cond
                     ((string= kernel "python") 
-                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3 --simple-prompt'")
-                    ((string= kernel "R")
-                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir --simple-prompt'")
+                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3'")
+                    ((string= kernel "r")
+                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir'")
                     ((string= kernel "stata")
-                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata --simple-prompt'")
+                     "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata'")
                     (t (error "Unsupported kernel: %s" kernel))))
          (termint-name (cond
                        ((string= kernel "python") "jupyter-python")
-                       ((string= kernel "R") "jupyter-r")
+                       ((string= kernel "r") "jupyter-r")
                        ((string= kernel "stata") "jupyter-stata")
                        (t (error "Unsupported kernel: %s" kernel))))
          (current-window (selected-window))
@@ -350,14 +354,17 @@ Otherwise, use normal cd command (which may prompt)."
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
     
-    ;; Define and start with smart command
-    (termint-define termint-name smart-cmd :bracketed-paste-p t)
+    ;; Define and start with smart command - use specific string for each kernel
+    (cond
+     ((string= kernel "python") (termint-define "jupyter-python" smart-cmd :bracketed-paste-p t))
+     ((string= kernel "r") (termint-define "jupyter-r" smart-cmd :bracketed-paste-p t))
+     ((string= kernel "stata") (termint-define "jupyter-stata" smart-cmd :bracketed-paste-p t)))
     
     ;; Start the console with display suppression
     (let ((display-buffer-alist (cons '("\\*jupyter-.*\\*" display-buffer-no-window) display-buffer-alist)))
       (cond
        ((string= kernel "python") (termint-jupyter-python-start))
-       ((string= kernel "R") (termint-jupyter-r-start))
+       ((string= kernel "r") (termint-jupyter-r-start))
        ((string= kernel "stata") (termint-jupyter-stata-start))))
     
     ;; Restore original window and buffer focus
@@ -370,7 +377,7 @@ Otherwise, use normal cd command (which may prompt)."
   "Get or create termint buffer for KERNEL without window switching."
   (let* ((buffer-name (cond
                       ((string= kernel "python") "*jupyter-python*")
-                      ((string= kernel "R") "*jupyter-r*") 
+                      ((string= kernel "r") "*jupyter-r*") 
                       ((string= kernel "stata") "*jupyter-stata*")
                       (t (error "Unsupported kernel: %s" kernel))))
          (buffer (get-buffer buffer-name)))
@@ -447,7 +454,7 @@ Otherwise, use normal cd command (which may prompt)."
       (let ((output-start (point-marker))
             (send-func (cond
                        ((string= kernel "python") #'termint-jupyter-python-send-string)
-                       ((string= kernel "R") #'termint-jupyter-r-send-string)
+                       ((string= kernel "r") #'termint-jupyter-r-send-string)
                        ((string= kernel "stata") #'termint-jupyter-stata-send-string)
                        (t (error "Unsupported kernel: %s" kernel)))))
         
@@ -475,7 +482,7 @@ IMAGE-FILE is the optional specific file path to save the image to.
 INTERACTIVE determines if this is called from C-RET (affects display behavior)."
   (let* ((detection-kernel (cond
                            ((string= kernel "python") "python3")
-                           ((string= kernel "R") "ir") 
+                           ((string= kernel "r") "ir") 
                            ((string= kernel "stata") "stata")
                            (t kernel)))
          (has-graphics (jupyter-termint-detect-graphics-code code detection-kernel))
@@ -533,7 +540,7 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
           (jupyter-termint-display-image-side-window image-file buffer)))))
 
 (defun jupyter-termint-display-image-side-window (image-file buffer)
-  "Display IMAGE-FILE in a dedicated side window for vterm compatibility."
+  "Display IMAGE-FILE in a dedicated side window for eat compatibility."
   (when (and image-file (file-exists-p image-file))
     (let ((image-buffer (get-buffer-create "*Jupyter Image*"))
           (original-window (selected-window)))
@@ -612,14 +619,14 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
   (let ((current-window (selected-window))
         (current-buffer (current-buffer)))
     (unwind-protect
-        (let* ((buffer (jupyter-termint-get-or-create-buffer "R"))
+        (let* ((buffer (jupyter-termint-get-or-create-buffer "r"))
                (results-type (cdr (assq :results params)))
                (has-graphics (jupyter-termint-detect-graphics-code body "ir")))
           (if has-graphics
               ;; For graphics code, use enhanced function
-              (jupyter-termint-send-string-with-images buffer body "R" nil nil)
+              (jupyter-termint-send-string-with-images buffer body "r" nil nil)
             ;; For non-graphics code, use regular execution
-            (or (jupyter-termint-send-string-with-output buffer body "R") "")))
+            (or (jupyter-termint-send-string-with-output buffer body "r") "")))
       ;; Always restore original window and buffer
       (when (window-live-p current-window)
         (select-window current-window))
@@ -655,7 +662,7 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
 ;;; Language detection
 (defun jupyter-termint-detect-kernel ()
   "Detect kernel from org-src buffer language."
-  (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
+  (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
                                  (match-string 1 (buffer-name))))
         (lang-from-variable (bound-and-true-p org-src--lang)))
     
@@ -677,9 +684,9 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
       (kill-buffer "*jupyter-python*")))
   
   ;; Define and start with smart direnv command
-  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3 --simple-prompt'"))
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3'"))
     (termint-define "jupyter-python" smart-cmd :bracketed-paste-p t)
-    (termint-jupyter-python-start)))
+    (termint-jupyter-python-start))))
 
 (defun jupyter-termint-smart-r-start ()
   "Start R jupyter console with smart direnv command."
@@ -691,9 +698,9 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
       (kill-buffer "*jupyter-r*")))
   
   ;; Define and start with smart direnv command
-  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir --simple-prompt'"))
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir'"))
     (termint-define "jupyter-r" smart-cmd :bracketed-paste-p t)
-    (termint-jupyter-r-start)))
+    (termint-jupyter-r-start))))
 
 (defun jupyter-termint-smart-stata-start ()
   "Start Stata jupyter console with smart direnv command."
@@ -705,7 +712,7 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
       (kill-buffer "*jupyter-stata*")))
   
   ;; Define and start with smart direnv command
-  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata --simple-prompt'"))
+  (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata'"))
     (termint-define "jupyter-stata" smart-cmd :bracketed-paste-p t)
     (termint-jupyter-stata-start)))
 
@@ -743,11 +750,11 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
   "Ensure console for KERNEL is running with direnv and window management, then send CODE."
   (let* ((kernel-config (cond
                         ((string= kernel "python")
-                         '("*jupyter-python*" jupyter-termint-smart-python-start))
+                         '("*jupyter-python*" termint-jupyter-python-start))
                         ((string= kernel "r")
-                         '("*jupyter-r*" jupyter-termint-smart-r-start))
+                         '("*jupyter-r*" termint-jupyter-r-start))
                         ((string= kernel "stata")
-                         '("*jupyter-stata*" jupyter-termint-smart-stata-start))
+                         '("*jupyter-stata*" termint-jupyter-stata-start))
                         (t (error "Unsupported kernel: %s" kernel))))
          (buffer-name (nth 0 kernel-config))
          (start-func (nth 1 kernel-config))
@@ -830,7 +837,7 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
   ;; Common function to set up keybindings in org-src buffers
   (defun jupyter-termint-setup-buffer-keybinding ()
     "Set up C-RET keybinding for the current org-src buffer."
-    (when (string-match "\\*Org Src.*\\[ \\([^]]+\\) \\]\\*" (buffer-name))
+    (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
       
       ;; Unbind in all evil states for this buffer
       (evil-local-set-key 'insert (kbd "C-<return>") nil)
@@ -843,7 +850,7 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
       (evil-local-set-key 'visual (kbd "C-<return>") #'jupyter-termint-send-simple)
       (local-set-key (kbd "C-<return>") #'jupyter-termint-send-simple)
       
-      nil)))
+      nil))
 
   ;; Set up hooks for all supported languages
   (add-hook 'python-mode-hook #'jupyter-termint-setup-buffer-keybinding)
