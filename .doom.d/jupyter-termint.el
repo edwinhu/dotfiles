@@ -45,10 +45,19 @@ When nil, images are displayed in separate popup windows."
 
 ;;; Image Detection Functions
 
+(defun jupyter-termint-map-to-jupyter-kernel (lang-kernel)
+  "Map detected language LANG-KERNEL to actual jupyter kernel name."
+  (cond
+   ((string= lang-kernel "python") "python3")
+   ((string= lang-kernel "r") "ir")
+   ((string= lang-kernel "stata") "stata")
+   (t lang-kernel)))
+
 (defun jupyter-termint-detect-graphics-code (code kernel)
   "Detect if CODE contains plotting commands for the given KERNEL."
-  (let ((code-lower (downcase code)))
-    (pcase kernel
+  (let ((code-lower (downcase code))
+        (jupyter-kernel (jupyter-termint-map-to-jupyter-kernel kernel)))
+    (pcase jupyter-kernel
       ("python3" (jupyter-termint--detect-python-graphics code-lower))
       ("ir" (jupyter-termint--detect-r-graphics code-lower))
       ("stata" (jupyter-termint--detect-stata-graphics code-lower))
@@ -133,17 +142,10 @@ else:
           code image-file jupyter-termint-image-dpi image-file))
 
 (defun jupyter-termint--inject-r-image (code image-file)
-  "Inject R save commands into R CODE."
-  (if (string-match-p "\\bggplot\\b" (downcase code))
-      ;; ggplot2 code
-      (format "%s
-ggsave('%s', width=8, height=6, dpi=%d, bg='white')"
-              code image-file jupyter-termint-image-dpi)
-    ;; Base graphics
-    (format "%s
-dev.copy(png, filename='%s', width=8*%d, height=6*%d, res=%d, bg='white')
-dev.off()"
-            code image-file jupyter-termint-image-dpi jupyter-termint-image-dpi jupyter-termint-image-dpi)))
+  "R plotting is now handled seamlessly via print method overrides in 01-r-sixel-config.R.
+No code injection needed - plots display automatically with sixel graphics."
+  ;; Return original code unchanged - print overrides handle everything automatically
+  code)
 
 (defun jupyter-termint--inject-stata-image (code image-file)
   "Inject Stata save commands into Stata CODE."
@@ -220,13 +222,13 @@ Otherwise, use normal cd command (which may prompt)."
               (termint-define "jupyter-python" python-cmd
                               :bracketed-paste-p t
                               :backend 'eat
-                              :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor")))
+                              :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
               
               ;; Define R Jupyter console with smart direnv handling (NO for IRdisplay support)
               (termint-define "jupyter-r" r-cmd
                               :bracketed-paste-p t
                               :backend 'eat
-                              :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor")))
+                              :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
               
               ;; Define Stata Jupyter console
               (termint-define "jupyter-stata" stata-cmd
@@ -480,11 +482,7 @@ BUFFER is the jupyter console buffer, CODE is the code to execute,
 KERNEL is the kernel type (python, R, stata).
 IMAGE-FILE is the optional specific file path to save the image to.
 INTERACTIVE determines if this is called from C-RET (affects display behavior)."
-  (let* ((detection-kernel (cond
-                           ((string= kernel "python") "python3")
-                           ((string= kernel "r") "ir") 
-                           ((string= kernel "stata") "stata")
-                           (t kernel)))
+  (let* ((detection-kernel (jupyter-termint-map-to-jupyter-kernel kernel))
          (has-graphics (jupyter-termint-detect-graphics-code code detection-kernel))
          (target-file (or image-file 
                          (when has-graphics (jupyter-termint-generate-image-filename detection-kernel))))
@@ -661,17 +659,32 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
 
 ;;; Language detection
 (defun jupyter-termint-detect-kernel ()
-  "Detect kernel from org-src buffer language."
+  "Detect kernel from org-src buffer language or org-mode code block."
+  (message "DEBUG: Starting kernel detection")
   (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
                                  (match-string 1 (buffer-name))))
-        (lang-from-variable (bound-and-true-p org-src--lang)))
+        (lang-from-variable (bound-and-true-p org-src--lang))
+        (lang-from-org-element (when (eq major-mode 'org-mode)
+                                 (org-element-property :language (org-element-at-point)))))
     
-    (let ((detected-lang (or lang-from-variable lang-from-buffer-name)))
+    (message "DEBUG: Buffer name lang: %s, Variable lang: %s, Org element lang: %s" 
+             lang-from-buffer-name lang-from-variable lang-from-org-element)
+    
+    (let ((detected-lang (or lang-from-variable lang-from-buffer-name lang-from-org-element)))
+      (message "DEBUG: Final detected-lang: %s" detected-lang)
       (cond
-       ((or (equal detected-lang "python") (eq major-mode 'python-mode) (eq major-mode 'python-ts-mode)) "python")
-       ((or (equal detected-lang "r") (equal detected-lang "R") (eq major-mode 'ess-r-mode)) "r") 
-       ((or (equal detected-lang "stata") (eq major-mode 'stata-mode)) "stata")
-       (t "python")))))
+       ((or (and detected-lang (or (string-equal detected-lang "r") (string-equal detected-lang "R"))) (eq major-mode 'ess-r-mode)) 
+        (message "DEBUG: Matched R condition")
+        "r")
+       ((or (and detected-lang (string-equal detected-lang "python")) (eq major-mode 'python-mode) (eq major-mode 'python-ts-mode)) 
+        (message "DEBUG: Matched Python condition")
+        "python")
+       ((or (and detected-lang (string-equal detected-lang "stata")) (eq major-mode 'stata-mode)) 
+        (message "DEBUG: Matched Stata condition")
+        "stata")
+       (t 
+        (message "DEBUG: Defaulting to python")
+        "python")))))
 
 ;;; Console management with all features
 (defun jupyter-termint-smart-python-start ()
@@ -683,9 +696,12 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
     (let ((kill-buffer-query-functions nil))
       (kill-buffer "*jupyter-python*")))
   
-  ;; Define and start with smart direnv command
+  ;; Define and start with smart direnv command, setting JUPYTER_CONSOLE env var
   (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3'"))
-    (termint-define "jupyter-python" smart-cmd :bracketed-paste-p t)
+    (termint-define "jupyter-python" smart-cmd 
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
     (termint-jupyter-python-start))))
 
 (defun jupyter-termint-smart-r-start ()
@@ -697,10 +713,81 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
     (let ((kill-buffer-query-functions nil))
       (kill-buffer "*jupyter-r*")))
   
-  ;; Define and start with smart direnv command
+  ;; Define and start with smart direnv command, setting JUPYTER_CONSOLE env var
   (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir'"))
-    (termint-define "jupyter-r" smart-cmd :bracketed-paste-p t)
-    (termint-jupyter-r-start))))
+    (termint-define "jupyter-r" smart-cmd 
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
+    (termint-jupyter-r-start)
+    
+    ;; Sixel configuration is now handled directly in .Rprofile
+    ))
+
+(defun jupyter-termint-force-r-sixel-setup ()
+  "Force setup R sixel graphics integration since .Rprofile doesn't load in Jupyter console."
+  (when (get-buffer "*jupyter-r*")
+    (with-current-buffer "*jupyter-r*"
+      (let ((sixel-config-path "/Users/vwh7mb/projects/wander2/.jupyter/startup/01-r-sixel-config.R")
+            (proc (get-buffer-process (current-buffer))))
+        ;; Check if process is alive and ready
+        (when (and proc (process-live-p proc) (file-exists-p sixel-config-path))
+          ;; Wait for console to be fully ready by checking for prompt
+          (let ((max-wait 15) (wait-count 0) (ready nil))
+            (while (and (< wait-count max-wait) (not ready))
+              (accept-process-output proc 0.5)
+              (save-excursion
+                (goto-char (point-max))
+                (beginning-of-line)
+                (when (looking-at-p "In \\[[0-9]+\\]:")
+                  (setq ready t)))
+              (setq wait-count (1+ wait-count)))
+            
+            (when ready
+              (message "Forcing R sixel configuration load...")
+              (termint-jupyter-r-send-string (format "source('%s')" sixel-config-path))
+              ;; Add a small delay and then confirm it loaded
+              (run-with-timer 2.0 nil (lambda ()
+                (when (get-buffer "*jupyter-r*")
+                  (message "✓ R sixel graphics integration forced and ready"))))
+              )))))))
+
+(defun jupyter-termint-auto-setup-r-sixel ()
+  "Automatically setup R sixel graphics integration by sourcing the configuration script."
+  (when (get-buffer "*jupyter-r*")
+    (with-current-buffer "*jupyter-r*"
+      (let ((sixel-config-path "/Users/vwh7mb/projects/wander2/.jupyter/startup/01-r-sixel-config.R")
+            (proc (get-buffer-process (current-buffer))))
+        ;; Check if process is alive and ready
+        (when (and proc (process-live-p proc) (file-exists-p sixel-config-path))
+          ;; Wait for console to be fully ready by checking for prompt
+          (let ((max-wait 10) (wait-count 0) (ready nil))
+            (while (and (< wait-count max-wait) (not ready))
+              (accept-process-output proc 0.5)
+              (save-excursion
+                (goto-char (point-max))
+                (beginning-of-line)
+                (when (looking-at-p "In \\[[0-9]+\\]:")
+                  (setq ready t)))
+              (setq wait-count (1+ wait-count)))
+            
+            (when ready
+              (termint-jupyter-r-send-string (format "source('%s')" sixel-config-path))
+              (message "R sixel graphics integration loaded automatically")
+              ;; Add a small delay and then confirm it loaded
+              (run-with-timer 2.0 nil (lambda ()
+                (when (get-buffer "*jupyter-r*")
+                  (message "R console ready with sixel graphics support"))))
+              )))))))
+
+(defun jupyter-termint-setup-r-sixel ()
+  "Setup R sixel graphics integration by sourcing the configuration script."
+  (when (get-buffer "*jupyter-r*")
+    (with-current-buffer "*jupyter-r*"
+      (let ((sixel-config-path "/Users/vwh7mb/projects/wander2/.jupyter/startup/01-r-sixel-config.R"))
+        (when (file-exists-p sixel-config-path)
+          (termint-jupyter-r-send-string (format "source('%s')" sixel-config-path))
+          (message "R sixel graphics integration loaded")))))))
 
 (defun jupyter-termint-smart-stata-start ()
   "Start Stata jupyter console with smart direnv command."
@@ -750,11 +837,11 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
   "Ensure console for KERNEL is running with direnv and window management, then send CODE."
   (let* ((kernel-config (cond
                         ((string= kernel "python")
-                         '("*jupyter-python*" termint-jupyter-python-start))
+                         '("*jupyter-python*" jupyter-termint-smart-python-start))
                         ((string= kernel "r")
-                         '("*jupyter-r*" termint-jupyter-r-start))
+                         '("*jupyter-r*" jupyter-termint-smart-r-start))
                         ((string= kernel "stata")
-                         '("*jupyter-stata*" termint-jupyter-stata-start))
+                         '("*jupyter-stata*" jupyter-termint-smart-stata-start))
                         (t (error "Unsupported kernel: %s" kernel))))
          (buffer-name (nth 0 kernel-config))
          (start-func (nth 1 kernel-config))
@@ -795,8 +882,9 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
                     (message "%s console ready!" kernel)
                     ;; Display in right split
                     (jupyter-termint-display-console-right new-buffer original-buffer original-window)
-                    ;; Give it a moment to fully initialize, then send code with image support
-                    (sleep-for 1)
+                    
+                    ;; Give console a moment to fully initialize
+                    (sleep-for 2)
                     ;; Use enhanced send function with interactive=t for image display
                     (jupyter-termint-send-string-with-images new-buffer code kernel nil t))
                 (progn
@@ -811,8 +899,12 @@ INTERACTIVE determines if this is called from C-RET (affects display behavior)."
          (code (cond
                 ((use-region-p)
                  (buffer-substring-no-properties (region-beginning) (region-end)))
-                ((> (point-max) (point-min))
-                 (buffer-substring-no-properties (point-min) (point-max)))
+                ((eq major-mode 'org-mode)
+                 ;; In org-mode, extract the current code block
+                 (let ((element (org-element-at-point)))
+                   (if (eq (org-element-type element) 'src-block)
+                       (org-element-property :value element)
+                     (thing-at-point 'line t))))
                 (t
                  (thing-at-point 'line t)))))
     

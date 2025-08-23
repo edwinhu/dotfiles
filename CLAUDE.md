@@ -83,6 +83,48 @@ dotfiles/
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
 
+### Jupyter Console Integration Architecture
+
+#### Technical Stack
+
+- **Process Management**: termint.el (not comint) with bracketed paste support for multi-line code blocks
+- **Terminal Backend**: eat (not vterm) - vterm does not support sixel graphics in Emacs
+- **Graphics Display**: img2sixel for inline sixel display by overloading plot functions (plt.show, ggplot2::print.ggplot, etc.)
+- **Console Mode**: Full jupyter console (no --simple-prompt flag) as it interferes with graphics display
+- **Environment**: TERM=xterm-kitty COLORTERM=truecolor for proper sixel support
+
+#### Key Files
+
+- **Primary**: `jupyter-termint.el` - Main implementation for both Python and R jupyter integration
+- **Deprecated**: `jupyter-console.el` - Should be removed, replaced by termint approach
+- **Language-specific**: `jupyter-r-sixel.el` - R-specific termint integration with ggplot2 overrides
+
+#### Why These Architectural Choices
+
+- **termint over comint**: Better multi-line handling with bracketed paste support for code blocks
+- **eat over vterm**: vterm in Emacs cannot display sixel graphics inline - eat provides native sixel support
+- **img2sixel**: Provides true inline graphics display in terminal buffers, essential for data visualization
+- **No --simple-prompt**: Required for proper graphics display and IRdisplay functionality in R/Python
+- **Function overloading**: Automatic sixel conversion by intercepting plot display functions
+
+#### Implementation Pattern
+
+Both Python and R use the unified approach:
+
+1. `termint-define` with eat backend and bracketed paste enabled
+2. `pixi run jupyter console --kernel {python3|ir}` (no simple-prompt flag)
+3. Environment variables: `TERM=xterm-kitty COLORTERM=truecolor` for sixel support
+4. Function overloading for automatic sixel graphics:
+   - Python: `plt.show()` → sixel display
+   - R: `print.ggplot()` → sixel display
+   - Automatic plot interception and conversion
+
+#### Buffer Management
+
+- Buffer names: `*jupyter-python*`, `*jupyter-r*`
+- Process management through termint with eat backend
+- Split-window display with automatic plot rendering in same buffer
+
 ### Claude Code Integration
 
 - **Screenshots**: Always resize screenshots to below 2000 pixels before uploading to Claude to avoid API errors
@@ -110,21 +152,21 @@ dotfiles/
    - Write/edit configuration files
    - Provide final summary of results from subagent
 
-**Example**: "Use the Task tool to create a testing subagent that verifies the jupyter sixel integration works by testing C-RET keybindings, checking buffer creation, sending test plots, and taking screenshots to confirm split window + sixel display."
+**Example**: "Use the Task tool to create a testing subagent that verifies the jupyter-termint.el sixel integration works by testing C-RET keybindings, checking *jupyter-python*/*jupyter-r* buffer creation, sending test plots with automatic plt.show()/print.ggplot() sixel conversion, and taking screenshots to confirm split window + inline sixel display."
 
 ### Screenshots and Screen Capture
 
-- **Emacs window screenshots**: Use the window ID approach for precise captures:
+- **Emacs window screenshots**: Use the streamlined osascript approach:
+
   ```bash
-  # Method 1: Get window ID and capture
-  screencapture -l $(osascript -e 'tell application "Emacs" to get the id of the front window') screenshot.png
-  
-  # Method 2: Activate Emacs first, then capture window
+  # Recommended method: Focus Emacs then capture with delay
   osascript -e 'tell application "Emacs" to activate'
-  screencapture -w screenshot.png
+  screencapture -T 0.5 screenshot.png
   ```
-- The window ID method (`-l`) is more reliable for automated screenshots
-- The window selection method (`-w`) is better for interactive use
+
+- This approach eliminates the need for user clicking or elisp delays
+- The `-T 0.5` flag adds a half-second delay after focusing (CRITICAL)
+- More reliable than window ID methods for automated testing
 
 ## Emacs Configuration Protocol (CRITICAL)
 
@@ -186,14 +228,17 @@ cd ~/.emacs.d && ./bin/doom sync
 **Then** tell user to restart Emacs.
 
 **To restart Emacs daemon/client**: If the Emacs client/daemon is killed or needs restarting, use:
+
 ```bash
 osascript -e 'tell application "Emacs" to activate'
 ```
+
 This properly opens the Emacs.app and starts the daemon.
 
 ### 6. ⚠️ ALWAYS Run Tests Yourself First
 
 **For Basic Syntax/Loading Tests:**
+
 ```bash
 # Test individual modules load correctly
 emacs --batch --eval "(progn
@@ -203,6 +248,7 @@ emacs --batch --eval "(progn
 ```
 
 **For Full Doom Environment Tests (REQUIRED):**
+
 ```bash
 # Test with actual running Doom environment via emacsclient
 emacsclient --eval "(progn
@@ -214,7 +260,7 @@ emacsclient --eval "(progn
     (message \"✗ Function not available\")))"
 ```
 
-**CRITICAL:** Batch mode tests do NOT accurately represent the full Doom environment. Always use `emacsclient` to test with the actual running configuration that users experience.
+**CRITICAL:** Batch mode tests do NOT accurately represent the full Doom environment. Always use `Bash(emacsclient ...)` to test with the actual running configuration that users experience.
 
 **Never ask user to test without running emacsclient tests yourself first**
 
@@ -223,6 +269,46 @@ emacsclient --eval "(progn
 - Only create commits when user confirms functionality is working
 - Include comprehensive test results in commit message
 - Document what was tested and verified
+
+## Emacs Startup Debugging Protocol
+
+When starting a fresh Emacs instance or encountering configuration errors, always follow this debugging protocol:
+
+1. **Check Warnings Buffer First**: Immediately after Emacs starts, check the *Warnings* buffer using:
+
+   ```bash
+   emacsclient --eval "(with-current-buffer \"*Warnings*\" (buffer-substring-no-properties (max 1 (- (point-max) 2000)) (point-max)))"
+   ```
+
+2. **Look for Common Issues**:
+   - File missing errors (e.g., "Cannot open load file")  
+   - Void function errors (e.g., "(void-function some-function)")
+   - Syntax errors in .el files
+   - Package loading failures
+
+3. **Fix Configuration Errors**:
+   - Remove references to deleted files in config.el, bindings.el
+   - Comment out calls to undefined functions
+   - Check for missing package dependencies
+   - Verify file paths are correct
+
+4. **Clean Restart Process**:
+   - Kill all Emacs processes: First find processes with `ps aux | grep -i emacs`, then use `kill -9 <PID>` for each Emacs process ID
+
+   ```bash
+   # Find Emacs processes
+   ps aux | grep -i emacs
+   # Kill each Emacs process (replace PID with actual process ID)
+   kill -9 <PID>
+   # Or use this one-liner to kill all at once
+   ps aux | grep -i emacs | grep -v grep | awk '{print $2}' | xargs kill -9
+   ```
+
+   - Delete compiled files: `find ~/.doom.d -name "*.elc" -delete`  
+   - Start fresh: `osascript -e 'tell application "Emacs" to activate'`
+   - Wait for full startup before testing functionality
+
+5. **Verify Fixes**: After fixing errors, always check the Warnings buffer again to ensure clean startup.
 
 ### Common Emacs Configuration Pitfalls
 
@@ -237,7 +323,7 @@ emacsclient --eval "(progn
 - [ ] All `.el` files pass `check-parens`
 - [ ] Individual modules load without errors (batch mode OK)
 - [ ] **Tests run by Claude first via emacsclient** - verify fixes work before asking user
-- [ ] **CRITICAL: Test with full Doom environment via emacsclient** - not batch mode
+- [ ] **CRITICAL: Test with full Doom environment via Bash(emacsclient)** - not batch mode
 - [ ] Function availability confirmed via `emacsclient --eval`
 - [ ] Buffer creation/behavior tested via `emacsclient --eval`
 - [ ] File-based logging implemented and working
@@ -256,8 +342,8 @@ emacsclient --eval "(if (fboundp 'your-function) (your-function) (message \"Func
 # Check buffer creation
 emacsclient --eval "(message \"Buffers: %s\" (mapcar #'buffer-name (buffer-list)))"
 
-# Get Messages buffer content for debugging
-emacsclient --eval "(with-current-buffer \"*Messages*\" (buffer-substring-no-properties (max 1 (- (point-max) 1000)) (point-max)))"
+# Get Warnings buffer content for debugging
+emacsclient --eval "(with-current-buffer \"*Warnings*\" (buffer-substring-no-properties (max 1 (- (point-max) 1000)) (point-max)))"
 ```
 
 ### Buffer Management for Testing
@@ -276,11 +362,16 @@ When testing functions that create buffers (especially those with running proces
   (set-buffer-modified-p nil) ; Mark buffer as unmodified
   (kill-this-buffer))
 
-;; Usage in tests
-(when (get-buffer "*test-buffer*") 
-  (with-current-buffer "*test-buffer*" 
+;; Usage in tests for jupyter buffers
+(when (get-buffer "*jupyter-python*") 
+  (with-current-buffer "*jupyter-python*" 
     (kill-this-buffer-unconditionally)))
+
+;; Clean up both Python and R jupyter buffers
+(dolist (buf '("*jupyter-python*" "*jupyter-r*"))
+  (when (get-buffer buf)
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer buf))))
 ```
 
-**Important**: Regular `kill-buffer` will prompt for confirmation when buffers have running processes (like termint/vterm sessions). Always use the `kill-buffer-query-functions nil` approach for automated testing.
-
+**Important**: Regular `kill-buffer` will prompt for confirmation when buffers have running processes (like termint sessions with jupyter console). Always use the `kill-buffer-query-functions nil` approach for automated testing. This is especially important for jupyter-termint.el buffers which maintain persistent jupyter console processes.
