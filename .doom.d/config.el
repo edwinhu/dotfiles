@@ -2,13 +2,61 @@
 ;; sync' after modifying this file!
 
 ;; CRITICAL: ZMQ completely eliminated - no jupyter package loaded
+;; Jupyter termint sixel integration is now handled directly in bindings.el
 
-;; Load jupyter-termint module for org-babel integration (replaces jupyter-console)
-(load (expand-file-name "jupyter-termint.el" 
-                       (or (bound-and-true-p doom-user-dir)
-                          (expand-file-name "~/.doom.d/"))))
+;; Load R jupyter sixel integration (uses termint approach like Python)
+;; R integration is now handled in unified jupyter-termint.el
 
-;; C-RET functionality is now integrated into jupyter-termint.el
+;; Load jupyter-termint for Python/R/Stata integration
+;; TEMPORARY: Using minimal version to avoid syntax errors
+(load (expand-file-name "jupyter-termint-minimal.el" doom-user-dir))
+(require 'jupyter-termint-minimal)
+
+;; Define language-specific wrapper functions for C-RET keybinding FIRST
+;; These must exist for the bindings.el to work properly
+
+(defun jupyter-python ()
+  "Start Python Jupyter console using minimal implementation."
+  (interactive)
+  (if (fboundp 'jupyter-termint-minimal-python)
+      (jupyter-termint-minimal-python)
+    (message "ERROR: jupyter-termint-minimal not properly loaded")))
+
+(defun jupyter-r ()
+  "Start R Jupyter console using minimal implementation."
+  (interactive)
+  (message "ERROR: R support not implemented in minimal version"))
+
+(defun jupyter-stata ()
+  "Start Stata Jupyter console using minimal implementation."
+  (interactive)
+  (if (fboundp 'jupyter-termint-minimal-stata)
+      (jupyter-termint-minimal-stata)
+    (message "ERROR: jupyter-termint-minimal not properly loaded")))
+
+;; Minimal setup - no complex functions
+(message "jupyter-termint-minimal: Basic functions available")
+(message "jupyter-termint-minimal: Available functions: %s"
+         (mapcar (lambda (f) (if (fboundp f) f (format "MISSING-%s" f)))
+                 '(jupyter-termint-minimal-python jupyter-termint-minimal-stata
+                   jupyter-python jupyter-stata)))
+
+;; Define missing functions that may not load properly from jupyter-termint.el
+(unless (fboundp 'jupyter-termint-detect-kernel)
+  (defun jupyter-termint-detect-kernel ()
+    "Detect kernel from org-src buffer language or org-mode code block."
+    (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
+                                   (match-string 1 (buffer-name))))
+          (lang-from-variable (bound-and-true-p org-src--lang))
+          (lang-from-org-element (when (eq major-mode 'org-mode)
+                                   (org-element-property :language (org-element-at-point)))))
+      
+      (let ((detected-lang (or lang-from-variable lang-from-buffer-name lang-from-org-element)))
+        (cond
+         ((or (and detected-lang (or (string-equal detected-lang "r") (string-equal detected-lang "R"))) (eq major-mode 'ess-r-mode)) "r")
+         ((or (and detected-lang (string-equal detected-lang "python")) (eq major-mode 'python-mode) (eq major-mode 'python-ts-mode)) "python")
+         ((or (and detected-lang (string-equal detected-lang "stata")) (eq major-mode 'stata-mode)) "stata")
+         (t "python"))))))
 
 ;; Define function to find pixi jupyter executable
 (defun find-pixi-jupyter ()
@@ -262,9 +310,9 @@
 ;; Setup jupyter-termint integration
 (with-eval-after-load 'org
   (message "Setting up jupyter-termint integration")
-  (when (featurep 'jupyter-termint)
+  (when (fboundp 'jupyter-termint-setup)
     (jupyter-termint-setup)
-    (jupyter-termint-setup-babel-integration)
+    ;; babel integration is handled automatically in jupyter-termint.el
     ;; Add debug info
     (message "jupyter-termint functions available: %s"
              (mapcar (lambda (f) (if (fboundp f) f (format "MISSING-%s" f)))
@@ -297,11 +345,8 @@
 (defun +jupyter-termint-force-setup ()
   "Force setup of jupyter-termint integration."
   (interactive)
-  (message "Forcing jupyter-termint setup...")
-  (require 'jupyter-termint)
-  (jupyter-termint-setup)
-  (jupyter-termint-setup-babel-integration)
-  (message "jupyter-termint setup complete!")
+  ;; TEMPORARY: No complex setup in minimal version
+  (message "Minimal jupyter-termint setup - complex functions disabled")
   (+jupyter-termint-debug))
 
 (defun +jupyter-termint-detailed-debug ()
@@ -891,15 +936,16 @@ that should be monospace but are often hijacked by Apple Color Emoji."
   :config
   (claude-code-ide-emacs-tools-setup)
   (setq claude-code-ide-window-width 140)
-  (setq claude-code-ide-terminal-backend 'vterm)
-  (setq claude-code-ide-vterm-anti-flicker t))
+  (setq claude-code-ide-terminal-backend 'eat)
+  ;; No anti-flicker needed for eat backend
+  )
 
 ;; Termint configuration for better REPL integration with vterm
 (use-package termint
   :demand t
   :config
-  ;; Use vterm as backend for proper terminal emulation
-  (setq termint-backend 'vterm)
+  ;; Use eat as backend for sixel support (vterm doesn't support sixel in Emacs)
+  (setq termint-backend 'eat)
   
   ;; Configure Claude Code with termint for better multi-line handling
   (termint-define "claude-code" "claude" 
@@ -1101,7 +1147,7 @@ that should be monospace but are often hijacked by Apple Color Emoji."
         ("C" "Configuration" claude-code-ide-config-menu)
         ("d" "Debugging" claude-code-ide-debug-menu)]]))
   
-  (message "termint: Claude Code integration configured with vterm backend"))
+  (message "termint: Claude Code integration configured with eat backend"))
 
 ;; Include SAS support
 (use-package! ob-sas
@@ -1203,6 +1249,36 @@ that should be monospace but are often hijacked by Apple Color Emoji."
     ;; Log after wrds-debug is available
     (when (fboundp 'wrds-debug-log)
       (wrds-debug-log 'info "SAS console advice installed (overriding ESS)"))))
+
+;; Install jupyter-termint advice for org-babel integration
+;; Create Stata org-babel override that routes to jupyter-termint
+(defun +jupyter-termint-stata-execute (body params)
+  "Execute Stata code using jupyter-termint integration."
+  (message "Executing Stata code via jupyter-termint...")
+  (message "Code body: %s" (substring body 0 (min 100 (length body))))
+  
+  ;; Simply call jupyter-stata function to start/reuse console
+  (if (fboundp 'jupyter-stata)
+      (progn
+        (jupyter-stata)
+        (message "Stata console started/reused")
+        
+        ;; Send the code to the console (simplified approach)
+        (when (get-buffer "*jupyter-stata*")
+          (with-current-buffer "*jupyter-stata*"
+            ;; Send the code - termint handles bracketed paste
+            (termint-send-string (string-trim body))))
+        
+        ;; Return empty string for org-babel
+        "")
+    (progn
+      (message "ERROR: jupyter-stata function not available")
+      "ERROR: jupyter-stata not available")))
+
+;; Install the org-babel override for Stata immediately
+(with-eval-after-load 'ob-stata
+  (advice-add 'org-babel-execute:stata :override #'+jupyter-termint-stata-execute)
+  (message "Stata org-babel override installed - routes to jupyter-termint"))
 ;; Language mode mappings for syntax highlighting in org source blocks
 (add-to-list 'org-src-lang-modes '("sas" . SAS))
 ;; Jupyter language mappings removed to prevent loading jupyter package
