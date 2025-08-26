@@ -143,7 +143,14 @@ Some protocols may work better with stata_kernel than others."
                            ("EUPORIE_GRAPHICS" . "kitty")       ; Use kitty protocol for Stata
                            ("LANG" . "en_US.UTF-8")            ; Explicit locale for Unicode
                            ("LC_ALL" . "en_US.UTF-8")))        ; Full locale support
-    (termint-euporie-stata-start)))
+    (termint-euporie-stata-start)
+    
+    ;; Set up output monitoring for automatic graphics
+    (when (get-buffer buffer-name)
+      (with-current-buffer buffer-name
+        (add-hook 'comint-output-filter-functions 
+                  'euporie-termint-monitor-stata-output nil t)
+        (euporie-termint-debug-log 'info "Output monitoring enabled for automatic graphics")))))
 
 ;;; Buffer Management
 
@@ -225,6 +232,32 @@ Some protocols may work better with stata_kernel than others."
         (when (buffer-live-p initial-buffer)
           (set-window-buffer (selected-window) initial-buffer))))))
 
+;;; Terminal Output Monitor for Automatic Graphics
+
+(defvar euporie-termint-stata-output-filter-hook nil
+  "Hook for monitoring Stata terminal output for automatic graphics.")
+
+(defun euporie-termint-monitor-stata-output (output)
+  "Monitor Stata terminal output and automatically display graphics."
+  (when (and output (stringp output))
+    (let ((graphics-pattern "file \\(.+\\.png\\) written in PNG format"))
+      (when (string-match graphics-pattern output)
+        (let ((png-file (match-string 1 output)))
+          (euporie-termint-debug-log 'info "Detected PNG file creation: %s" png-file)
+          ;; Inject chafa command automatically
+          (when (and png-file (file-exists-p png-file))
+            (let ((chafa-cmd (format "! chafa \"%s\"" png-file)))
+              (euporie-termint-debug-log 'info "Auto-injecting chafa command: %s" chafa-cmd)
+              ;; Send to the stata buffer after a brief delay
+              (run-with-timer 0.5 nil 
+                            (lambda (cmd)
+                              (when (get-buffer "*euporie-stata*")
+                                (with-current-buffer "*euporie-stata*"
+                                  (process-send-string (get-buffer-process (current-buffer)) 
+                                                     (concat cmd "\n")))))
+                            chafa-cmd)))))))
+  output)
+
 ;;; Graphics File Monitor for Stata
 
 (defvar euporie-termint-stata-file-watcher nil
@@ -247,9 +280,13 @@ Some protocols may work better with stata_kernel than others."
           (progn
             (setq euporie-termint-stata-file-watcher
                   (start-process "stata-file-monitor" nil "fswatch" "-o" cache-dir))
-            (set-process-filter euporie-termint-stata-file-watcher #'euporie-termint-stata-file-event-handler))
+            (set-process-filter euporie-termint-stata-file-watcher #'euporie-termint-stata-file-event-handler)
+            (euporie-termint-debug-log 'info "File monitor started with fswatch"))
         ;; Fallback: use a timer for polling
-        (run-with-timer 1 1 #'euporie-termint-check-new-stata-graphs)))))
+        (progn
+          (setq euporie-termint-stata-file-watcher
+                (run-with-timer 1 1 #'euporie-termint-check-new-stata-graphs))
+          (euporie-termint-debug-log 'info "File monitor started with timer polling (fswatch not available)"))))))
 
 (defun euporie-termint-stata-file-event-handler (process output)
   "Handle file system events for Stata graphics directory."
@@ -304,9 +341,11 @@ Some protocols may work better with stata_kernel than others."
       (funcall send-func code)
       
       ;; Start file monitoring for Stata graphics if not already running
-      (when (and (string= kernel "stata") 
-                 (not euporie-termint-stata-file-watcher))
-        (run-with-timer 0.5 nil #'euporie-termint-start-stata-file-monitor))
+      (when (string= kernel "stata")
+        (unless (or (and euporie-termint-stata-file-watcher 
+                        (or (process-live-p euporie-termint-stata-file-watcher)
+                            (timerp euporie-termint-stata-file-watcher))))
+          (run-with-timer 0.5 nil #'euporie-termint-start-stata-file-monitor)))
       
       ;; Return buffer for further processing if needed
       buffer)))
