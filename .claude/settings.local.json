@@ -6,7 +6,13 @@
       "Bash(cat:*)",
       "Bash(find:*)",
       "Bash(zsh:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Read(//Users/vwh7mb/projects/wander2/.jupyter/startup/**)",
+      "WebFetch(domain:github.com)",
+      "Read(//Users/vwh7mb/projects/wander2/.pixi/envs/default/lib/python3.12/site-packages/stata_kernel/**)",
+      "Read(//Users/vwh7mb/projects/wander2/.pixi/envs/default/lib/python3.12/site-packages/ipykernel/**)",
+      "Read(//Users/vwh7mb/projects/wander2/.pixi/envs/default/lib/R/library/IRkernel/R/**)",
+      "Read(//Users/vwh7mb/projects/wander2/.jupyter/startup/**)"
     ],
     "deny": []
   }

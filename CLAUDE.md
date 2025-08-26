@@ -83,76 +83,97 @@ dotfiles/
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
 
-### Jupyter Console Integration Architecture
+### Euporie Console Integration Architecture
 
 #### Technical Stack
 
 - **Process Management**: termint.el (not comint) with bracketed paste support for multi-line code blocks
-- **Terminal Backend**: eat (not vterm) - vterm does not support sixel graphics in Emacs
-- **Graphics Display**: img2sixel for inline sixel display by overloading plot functions (plt.show, ggplot2::print.ggplot, etc.)
-- **Console Mode**: Full jupyter console (no --simple-prompt flag) as it interferes with graphics display
+- **Terminal Backend**: eat (NEVER vterm) - vterm cannot display sixel graphics in Emacs
+- **Graphics Display**: Native euporie graphics display with automatic sixel/kitty/iterm protocol detection
+- **Console Mode**: euporie-console with native graphics support (not jupyter console)
 - **Environment**: TERM=xterm-kitty COLORTERM=truecolor for proper sixel support
+- **CRITICAL**: Always use eat backend - vterm will break inline graphics display
 
 #### Key Files
 
-- **Primary**: `jupyter-termint.el` - Main implementation for both Python and R jupyter integration
-- **Deprecated**: `jupyter-console.el` - Should be removed, replaced by termint approach
-- **Language-specific**: `jupyter-r-sixel.el` - R-specific termint integration with ggplot2 overrides
+- **Primary**: `euporie-termint.el` - Main implementation for Python, R, and Stata euporie integration
+- **Deprecated**: `jupyter-console.el` - Should be removed, replaced by euporie approach
+- **Deprecated**: `jupyter-termint.el` - Replaced by euporie-termint.el for native graphics
 
 #### Why These Architectural Choices
 
 - **termint over comint**: Better multi-line handling with bracketed paste support for code blocks
-- **eat over vterm**: vterm in Emacs cannot display sixel graphics inline - eat provides native sixel support
-- **img2sixel**: Provides true inline graphics display in terminal buffers, essential for data visualization
-- **No --simple-prompt**: Required for proper graphics display and IRdisplay functionality in R/Python
-- **Function overloading**: Automatic sixel conversion by intercepting plot display functions
+- **eat over vterm**: CRITICAL - vterm in Emacs cannot display sixel graphics inline - eat provides native sixel support
+- **euporie-console**: Native terminal graphics support with automatic protocol detection (sixel/kitty/iterm)
+- **No manual graphics commands**: euporie automatically detects and displays plots inline
+- **Enhanced Stata kernel**: Uses stata_kernel_euporie fork for native Stata graphics support
 
 #### Implementation Pattern
 
-Both Python and R use the unified approach:
+All three languages (Python, R, Stata) use the unified euporie approach:
 
-1. `termint-define` with eat backend and bracketed paste enabled
-2. `pixi run jupyter console --kernel {python3|ir}` (no simple-prompt flag)
-3. Environment variables: `TERM=xterm-kitty COLORTERM=truecolor` for sixel support
-4. Function overloading for automatic sixel graphics:
-   - Python: `plt.show()` → sixel display
-   - R: `print.ggplot()` → sixel display
-   - Automatic plot interception and conversion
+1. `termint-define` with eat backend (NEVER vterm) and bracketed paste enabled
+2. `pixi run euporie-console --graphics=sixel --kernel-name={python3|ir|stata_kernel_euporie}`
+3. Environment variables: `TERM=xterm-kitty COLORTERM=truecolor` for graphics support
+4. **CRITICAL**: Terminal backend must be eat - vterm will break graphics
+4. Native graphics display with automatic protocol detection:
+   - Python: `plt.plot()` → automatic inline display
+   - R: `ggplot()` → automatic inline display  
+   - Stata: `graph twoway` → automatic inline display via enhanced kernel
 
 #### Buffer Management
 
-- Buffer names: `*jupyter-python*`, `*jupyter-r*`
-- Process management through termint with eat backend
+- Buffer names: `*euporie-python*`, `*euporie-r*`, `*euporie-stata*`
+- Process management through termint with eat backend (NEVER vterm)
 - Split-window display with automatic plot rendering in same buffer
+- **CRITICAL**: eat backend required for sixel graphics - vterm will not work
 
 ### Claude Code Integration
 
 - **Screenshots**: Always resize screenshots to below 2000 pixels before uploading to Claude to avoid API errors
 - When taking screenshots for debugging/verification, use tools like `convert` or `sips` to resize: `sips -Z 1900 screenshot.png`
 
-### Testing and Verification Protocol
+### Agent Orchestration Protocol - Emacs-Euporie TDD Workflow
 
-**IMPORTANT**: Testing workflows with `Bash(emacsclient ...)` and screenshots consume excessive context. Instead:
+**PROJECT**: Emacs-euporie integration at `~/projects/emacs-euporie` using **Test-Driven Development**
 
-1. **Use the Task tool with general-purpose agent** for all testing workflows that involve:
-   - Multiple `emacsclient --eval` commands
-   - Screenshot verification
-   - Interactive testing of Emacs functionality
-   - Buffer management and verification
+**CRITICAL**: Main Claude's role is ONLY orchestration and planning. Always delegate to specialized agents:
 
-2. **Testing subagent should handle**:
-   - All `emacsclient --eval` testing commands
-   - Screenshot capture and verification
-   - Function availability checking
-   - Buffer content verification
-   - Keybinding testing
+#### 1. **euporie-integration-test-writer Agent** (Test Creation):
+   - **Scope**: Write comprehensive unit tests for user workflows
+   - **Focus**: Inline graphics display, C-RET keybindings, multi-language support
+   - **Deliverables**: Test suites with clear pass/fail criteria
+   - **Coordinate with**: Developer agent for test refinement
 
-3. **Main Claude should only**:
-   - Plan the implementation
-   - Write/edit configuration files
-   - Provide final summary of results from subagent
+#### 2. **euporie-developer Agent** (Implementation):
+   - **Scope**: Implement features to satisfy test requirements
+   - **Focus**: Emacs Lisp functions, kernel integration, graphics protocols
+   - **Deliverables**: Working code that passes all unit tests
+   - **Coordinate with**: Test writer specs, tester feedback
 
-**Example**: "Use the Task tool to create a testing subagent that verifies the jupyter-termint.el sixel integration works by testing C-RET keybindings, checking *jupyter-python*/*jupyter-r* buffer creation, sending test plots with automatic plt.show()/print.ggplot() sixel conversion, and taking screenshots to confirm split window + inline sixel display."
+#### 3. **euporie-tester Agent** (Validation):
+   - **Scope**: Execute comprehensive testing of implementations
+   - **Focus**: User experience validation, cross-language compatibility
+   - **Deliverables**: Detailed test reports with pass/fail analysis
+   - **Coordinate with**: Main Claude for result evaluation
+
+#### 4. **Main Claude** (Orchestration ONLY):
+   - **Plan features**: Define requirements and acceptance criteria
+   - **Coordinate agents**: Manage test → develop → test cycles
+   - **Evaluate results**: Analyze outcomes and plan iterations
+   - **User interaction**: Gather feedback and refine requirements
+   - **NEVER directly code**: Always delegate to appropriate agents
+
+#### **TDD Workflow**:
+1. **Test Writer** → Creates unit tests for specific user workflows
+2. **Developer** → Implements features to pass the tests
+3. **Tester** → Validates implementation and reports results
+4. **Main Claude** → Evaluates and plans next iteration
+
+**Examples**:
+- Test creation: "Use the euporie-integration-test-writer agent to create unit tests for inline graphics display in emacs eat using sixel"
+- Implementation: "Use the euporie-developer agent to implement the features needed to pass the graphics display tests"
+- Validation: "Use the euporie-tester agent to run the full test suite and validate user experience"
 
 ### Screenshots and Screen Capture
 
@@ -353,7 +374,7 @@ When testing functions that create buffers (especially those with running proces
 ```elisp
 ;; For buffers with running processes - bypasses confirmation prompts
 (let ((kill-buffer-query-functions nil))
-  (kill-buffer "*jupyter-python*"))
+  (kill-buffer "*euporie-python*"))
 
 ;; Alternative function for unconditional killing
 (defun kill-this-buffer-unconditionally ()
@@ -362,16 +383,16 @@ When testing functions that create buffers (especially those with running proces
   (set-buffer-modified-p nil) ; Mark buffer as unmodified
   (kill-this-buffer))
 
-;; Usage in tests for jupyter buffers
-(when (get-buffer "*jupyter-python*") 
-  (with-current-buffer "*jupyter-python*" 
+;; Usage in tests for euporie buffers
+(when (get-buffer "*euporie-python*") 
+  (with-current-buffer "*euporie-python*" 
     (kill-this-buffer-unconditionally)))
 
-;; Clean up both Python and R jupyter buffers
-(dolist (buf '("*jupyter-python*" "*jupyter-r*"))
+;; Clean up Python, R, and Stata euporie buffers
+(dolist (buf '("*euporie-python*" "*euporie-r*" "*euporie-stata*"))
   (when (get-buffer buf)
     (let ((kill-buffer-query-functions nil))
       (kill-buffer buf))))
 ```
 
-**Important**: Regular `kill-buffer` will prompt for confirmation when buffers have running processes (like termint sessions with jupyter console). Always use the `kill-buffer-query-functions nil` approach for automated testing. This is especially important for jupyter-termint.el buffers which maintain persistent jupyter console processes.
+**Important**: Regular `kill-buffer` will prompt for confirmation when buffers have running processes (like termint sessions with euporie console). Always use the `kill-buffer-query-functions nil` approach for automated testing. This is especially important for euporie-termint.el buffers which maintain persistent euporie console processes with eat backend.

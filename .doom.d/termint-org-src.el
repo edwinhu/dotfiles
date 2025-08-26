@@ -127,7 +127,7 @@ Returns a cons cell (START . END)."
       (with-temp-buffer
         (let ((exit-code (call-process "direnv" nil t nil "status")))
           (termint-org-src-debug-log 'info "Direnv status exit code: %d" exit-code)
-          (termint-org-src-debug-log 'info "Direnv status output: %s" (buffer-string))))
+          (termint-org-src-debug-log 'info "Direnv status output: %s" (buffer-string)))))
     
     ;; Test if direnv exec works
     (termint-org-src-debug-log 'info "Testing direnv exec command...")
@@ -137,7 +137,7 @@ Returns a cons cell (START . END)."
         (let ((exit-code (call-process "sh" nil t nil "-c" 
                                       "cd /Users/vwh7mb/projects/wander2 && direnv exec . echo DIRENV_WORKS")))
           (termint-org-src-debug-log 'info "Test command exit code: %d" exit-code)
-          (termint-org-src-debug-log 'info "Test command output: %s" (buffer-string))))
+          (termint-org-src-debug-log 'info "Test command output: %s" (buffer-string)))))
     
     ;; Kill any existing hung buffer first
     (when (get-buffer "*jupyter-python*")
@@ -148,10 +148,13 @@ Returns a cons cell (START . END)."
     ;; Define and start with smart command
     (let ((smart-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel python3'"))
       (termint-org-src-debug-log 'info "Defining termint with command: %s" smart-cmd)
-      (termint-define "jupyter-python" smart-cmd :bracketed-paste-p t)
+      (termint-define "jupyter-python" smart-cmd 
+                      :bracketed-paste-p t
+                      :backend 'eat
+                      :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
       (termint-org-src-debug-log 'info "Calling termint-jupyter-python-start...")
       (termint-jupyter-python-start)
-      (termint-org-src-debug-log 'info "=== SMART PYTHON CONSOLE START DEBUG END ===")))
+      (termint-org-src-debug-log 'info "=== SMART PYTHON CONSOLE START DEBUG END ==="))))
 
 (defun termint-org-src-smart-r-start ()
   "Start R jupyter console with smart direnv command."
@@ -165,8 +168,32 @@ Returns a cons cell (START . END)."
   ;; Define and start with smart command
   (termint-define "jupyter-r" 
                   "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel ir'"
-                  :bracketed-paste-p t)
+                  :bracketed-paste-p t
+                  :backend 'eat
+                  :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
   (termint-jupyter-r-start))
+
+(defun termint-org-src-smart-stata-start ()
+  "Start Stata jupyter console with smart direnv command for org-src integration."
+  (interactive)
+  (termint-org-src-debug-log 'info "Starting smart Stata console")
+  ;; Kill any existing hung buffer first
+  (when (get-buffer "*jupyter-stata*")
+    (termint-org-src-debug-log 'info "Killing existing hung *jupyter-stata* buffer")
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*jupyter-stata*")))
+  
+  ;; Start monitoring before console starts
+  (when (fboundp 'jupyter-termint-start-stata-graph-monitoring)
+    (jupyter-termint-start-stata-graph-monitoring))
+  
+  ;; Define and start with smart command
+  (termint-define "jupyter-stata" 
+                  "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run jupyter console --kernel stata'"
+                  :bracketed-paste-p t
+                  :backend 'eat
+                  :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
+  (termint-jupyter-stata-start))
 
 (defun termint-org-src-get-console-buffer-name (kernel)
   "Get the expected console buffer name for KERNEL."
@@ -182,7 +209,7 @@ Returns a cons cell (START . END)."
   (pcase kernel
     ("python" 'termint-org-src-smart-python-start)
     ("r" 'termint-org-src-smart-r-start)
-    ("stata" 'termint-jupyter-stata-start)
+    ("stata" 'termint-org-src-smart-stata-start)
     ("sas" 'sas-console-send-line)  ; SAS uses different approach
     (_ (error "Unknown kernel: %s" kernel))))
 
@@ -247,65 +274,61 @@ Returns a cons cell (START . END)."
   ;; Detailed logging of initial state
   (let ((initial-window (selected-window))
         (initial-buffer (current-buffer))
-        (initial-buffer-name (buffer-name))
-        (window-list-before (mapcar (lambda (w) (cons w (buffer-name (window-buffer w)))) (window-list))))
+        (initial-buffer-name (buffer-name)))
     
     (termint-org-src-debug-log 'info "Before display-buffer:")
     (termint-org-src-debug-log 'info "  Selected window: %s" initial-window)
     (termint-org-src-debug-log 'info "  Current buffer: %s" initial-buffer-name)
-    (termint-org-src-debug-log 'info "  Window list: %s" window-list-before)
     
-    ;; Use display-buffer with specific parameters for right split
-    (let ((console-window (display-buffer buffer
-                                          '((display-buffer-reuse-window
-                                             display-buffer-in-side-window)
-                                            (side . right)
-                                            (window-width . 0.5)
-                                            (inhibit-same-window . t)))))
-      
-      ;; Log state after display-buffer
-      (let ((window-list-after (mapcar (lambda (w) (cons w (buffer-name (window-buffer w)))) (window-list)))
-            (selected-after-display (selected-window))
-            (current-after-display (buffer-name)))
-        
-        (termint-org-src-debug-log 'info "After display-buffer:")
-        (termint-org-src-debug-log 'info "  Console window created: %s" console-window)
-        (termint-org-src-debug-log 'info "  Selected window: %s" selected-after-display)
-        (termint-org-src-debug-log 'info "  Current buffer: %s" current-after-display)
-        (termint-org-src-debug-log 'info "  Window list: %s" window-list-after)
-        
-        (when console-window
-          ;; Briefly switch to console window to scroll to bottom
-          (termint-org-src-debug-log 'info "Switching to console window to scroll...")
-          (with-selected-window console-window
-            (goto-char (point-max)))
-          
-          ;; Force restore focus to original window and buffer
-          (termint-org-src-debug-log 'info "Restoring focus to original buffer...")
-          (when (window-live-p initial-window)
-            (termint-org-src-debug-log 'info "  Selecting initial window: %s" initial-window)
+    ;; Check if console buffer is already visible
+    (let ((console-window (get-buffer-window buffer)))
+      (if console-window
+          ;; Console already visible, just ensure it's focused properly
+          (progn
+            (termint-org-src-debug-log 'info "Console already visible in window: %s" console-window)
+            (with-selected-window console-window
+              (goto-char (point-max)))
+            ;; Keep focus on original window
             (select-window initial-window))
+        
+        ;; Console not visible, create split layout
+        (progn
+          (termint-org-src-debug-log 'info "Creating split window layout")
           
-          ;; Don't use switch-to-buffer - use set-window-buffer instead
+          ;; If only one window, split horizontally
+          (when (= 1 (length (window-list)))
+            (split-window-right)
+            (termint-org-src-debug-log 'info "Split window created"))
+          
+          ;; Move to right window and display console buffer
+          (other-window 1)
+          (switch-to-buffer buffer)
+          (setq console-window (selected-window))
+          (goto-char (point-max))
+          (termint-org-src-debug-log 'info "Console buffer displayed in right window")
+          
+          ;; Return to original window  
+          (select-window initial-window)
+          
+          ;; Ensure original buffer is still displayed in left window
           (when (buffer-live-p initial-buffer)
-            (termint-org-src-debug-log 'info "  Setting window buffer to: %s" initial-buffer-name)
-            (set-window-buffer (selected-window) initial-buffer))
+            (set-window-buffer initial-window initial-buffer))
           
-          ;; Final state logging
-          (let ((final-selected (selected-window))
-                (final-buffer (buffer-name))
-                (window-list-final (mapcar (lambda (w) (cons w (buffer-name (window-buffer w)))) (window-list))))
-            
-            (termint-org-src-debug-log 'info "Final state:")
-            (termint-org-src-debug-log 'info "  Selected window: %s" final-selected)
-            (termint-org-src-debug-log 'info "  Current buffer: %s" final-buffer)
-            (termint-org-src-debug-log 'info "  Window list: %s" window-list-final)
-            
-            (if (string= final-buffer initial-buffer-name)
-                (termint-org-src-debug-log 'info "✓ Successfully preserved original buffer")
-              (termint-org-src-debug-log 'error "✗ Failed to preserve original buffer: %s -> %s" initial-buffer-name final-buffer)))))
+          (termint-org-src-debug-log 'info "Returned focus to original window"))))
+    
+    ;; Final state logging
+    (let ((final-selected (selected-window))
+          (final-buffer (buffer-name)))
       
-      (termint-org-src-debug-log 'info "=== WINDOW MANAGEMENT DEBUG END ===")))
+      (termint-org-src-debug-log 'info "Final state:")
+      (termint-org-src-debug-log 'info "  Selected window: %s" final-selected)
+      (termint-org-src-debug-log 'info "  Current buffer: %s" final-buffer)
+      
+      (if (string= final-buffer initial-buffer-name)
+          (termint-org-src-debug-log 'info "✓ Successfully preserved original buffer")
+        (termint-org-src-debug-log 'error "✗ Failed to preserve original buffer: %s -> %s" initial-buffer-name final-buffer)))
+    
+    (termint-org-src-debug-log 'info "=== WINDOW MANAGEMENT DEBUG END ===")))
 
 ;;; Core Send Function
 
@@ -324,7 +347,7 @@ Automatically starts console if it doesn't exist."
     
     ;; Don't send empty code
     (when (and trimmed-code (not (string-empty-p trimmed-code)))
-      ;; Ensure console is running first
+      ;; Ensure console is running first - this also creates the split window
       (termint-org-src-ensure-console kernel)
       
       ;; Now send the code
@@ -378,7 +401,8 @@ After sending, advance to the next code line."
                    (termint-org-src-debug-log 'error "Kernel detection failed: %s" err)
                    (error "Cannot detect language/kernel: %s" err))))
         (start-pos (point))
-        (sent-something nil))
+        (sent-something nil)
+        (in-org-src-buffer (bound-and-true-p org-src-mode)))
     
     (termint-org-src-debug-log 'info "Using kernel: %s" kernel)
     
@@ -415,8 +439,16 @@ After sending, advance to the next code line."
     
     ;; Move to next code line if we sent something
     (when sent-something
+      ;; If we're in an org-src edit buffer, ensure split window layout
+      (when in-org-src-buffer
+        (termint-org-src-debug-log 'info "Creating split window layout for org-src buffer")
+        (let ((console-buffer (get-buffer (termint-org-src-get-console-buffer-name kernel))))
+          (when console-buffer
+            ;; Ensure console is displayed in right split
+            (termint-org-src-display-console-right console-buffer))))
+      
       (termint-org-src-next-code-line)
-      (message "Code sent to %s console" kernel))))
+      (message "Code sent to %s console" kernel)))))
 
 ;;; Keybinding Setup
 
@@ -571,14 +603,17 @@ After sending, advance to the next code line."
       (termint-org-src-debug-log 'info "Function availability - Python: %s, R: %s, Stata: %s" python-send r-send stata-send))
     
     (message "=== End Test ===")
-    (termint-org-src-debug-log 'info "=== TEST COMPLETED ===")))
+    (termint-org-src-debug-log 'info "=== TEST COMPLETED ==="))))
 
-;; Initialize logging
-(termint-org-src-clear-log)
-(termint-org-src-debug-log 'info "termint-org-src.el loaded")
+;; Initialize logging - disabled to avoid loading issues
+;; (when (fboundp 'termint-org-src-clear-log)
+;;   (termint-org-src-clear-log))
+;; (when (fboundp 'termint-org-src-debug-log) 
+;;   (termint-org-src-debug-log 'info "termint-org-src.el loaded"))
 
-;; Set up keybindings
-(termint-org-src-setup-keybindings)
+;; Set up keybindings - disabled to avoid loading issues
+;; (when (fboundp 'termint-org-src-setup-keybindings)
+;;   (termint-org-src-setup-keybindings))
 
 (provide 'termint-org-src)
 ;;; termint-org-src.el ends here

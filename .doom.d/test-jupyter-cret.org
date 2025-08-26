@@ -1,0 +1,38 @@
+* Test Jupyter C-RET Integration
+
+This file is for testing the C-RET keybinding fix.
+
+** Python Test Block
+
+#+begin_src python
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 10, 100)
+y = np.sin(x)
+
+plt.figure(figsize=(8, 6))
+plt.plot(x, y)
+plt.title("Test Plot")
+plt.show()
+#+end_src
+
+** R Test Block
+
+#+begin_src R
+library(ggplot2)
+
+data <- data.frame(x = 1:10, y = rnorm(10))
+p <- ggplot(data, aes(x = x, y = y)) + 
+  geom_point() +
+  geom_line() +
+  labs(title = "Test R Plot")
+print(p)
+#+end_src
+
+** Stata Test Block
+
+#+begin_src stata
+sysuse auto, clear
+scatter mpg weight
+#+end_src

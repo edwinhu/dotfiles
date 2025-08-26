@@ -15,5 +15,20 @@ if [[ -f "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]]; then
   . "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
 fi
 
+# Host-specific environment variables
+if [[ $(hostname) == *"wrds"* ]] || [[ $(hostname) == *"wharton"* ]]; then
+    # Limit threading on WRDS to prevent resource exhaustion during pixi installs
+    export TOKIO_WORKER_THREADS=1
+    export RAYON_NUM_THREADS=1
+    export UV_CONCURRENT_DOWNLOADS=1
+    export UV_CONCURRENT_BUILDS=1
+    export UV_CONCURRENT_INSTALLS=1
+    
+    # Helper function for installing packages that hit threading limits
+    pixi-install-safe() {
+        nice -n 19 ionice -c 3 pixi global install "$@"
+    }
+fi
+
 # Agenix environment variables are handled by home-manager
 # They are automatically sourced via hm-session-vars.sh

@@ -1,0 +1,17 @@
+Execute comprehensive Jupyter-Stata sixel graphics testing following the complete protocol in combined-test-instructions.md. The developer has fixed critical buffer permission and sixel display issues. Test the fixes by:
+
+1. Fresh Emacs restart with error checking
+2. Module loading verification (jupyter-stata, eat, termint functions)  
+3. Single Stata scatter plot execution with sixel display verification
+4. Sequential histogram plot to test persistence  
+5. Buffer permission testing for modification errors
+6. Screenshot capture of visual sixel graphics display
+7. Window configuration verification
+
+Expected fixes to verify:
+- No "text-read-only" buffer errors 
+- Actual sixel graphics visible in eat terminal buffer
+- Proper terminal spacing prevents plot overwriting
+- Sequential plots persist in same jupyter buffer
+
+Log all results to ~/stata-sixel-test-results.log and capture screenshot as stata-sixel-fix-test.png. Report final PASS/FAIL status for each test component.

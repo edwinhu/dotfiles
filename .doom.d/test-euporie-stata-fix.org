@@ -1,0 +1,42 @@
+#+TITLE: Test Euporie Stata Graphics Fix
+#+DATE: 2025-08-26
+
+This file tests the fixed euporie integration where the stata_kernel patch is properly bypassed when using euporie-console.
+
+* Test 1: Basic Stata Console
+First, let's verify the console starts properly:
+
+#+begin_src stata
+display "Euporie Stata console test"
+display c(current_date)
+#+end_src
+
+* Test 2: Data Setup
+Load some test data:
+
+#+begin_src stata
+clear
+sysuse auto
+describe
+#+end_src
+
+* Test 3: Simple Graphics
+Test histogram display (should work through euporie's native graphics):
+
+#+begin_src stata
+histogram mpg, bin(10) title("MPG Distribution")
+#+end_src
+
+* Test 4: Scatter Plot  
+Test scatter plot display:
+
+#+begin_src stata
+scatter mpg weight, title("MPG vs Weight")
+#+end_src
+
+* Test 5: Regression Plot
+Test regression with fitted line:
+
+#+begin_src stata
+twoway (scatter mpg weight) (lfit mpg weight), title("MPG vs Weight with Regression Line")
+#+end_src

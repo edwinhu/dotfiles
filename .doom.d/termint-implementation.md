@@ -1,14 +1,14 @@
 # Termint Implementation Progress
 
 ## Goal
-Replace comint-based jupyter-console with termint.el using vterm backend to enable proper bracketed paste mode and single-cell multi-line execution.
+Replace comint-based jupyter-console with termint.el using eat backend to enable proper bracketed paste mode and sixel graphics support. CRITICAL: Never use vterm backend - eat is required for inline graphics display.
 
 ## Current Status
 - ✅ Added termint package to packages.el
 - ✅ Ran doom sync to install termint  
 - ✅ Configured Claude Code integration in config.el
-- ✅ Created jupyter-termint.el implementation
-- ✅ Updated config.el to use jupyter-termint instead of jupyter-console
+- ✅ Created euporie-termint.el implementation
+- ✅ Updated config.el to use euporie-termint instead of jupyter-console
 - ✅ Verified termint installation and syntax
 - ✅ Created test files for Jupyter multi-line functionality
 - ✅ Remapped all Claude Code IDE keybindings to termint versions
@@ -33,7 +33,7 @@ None yet.
   :bind (("C-c C" . termint-claude-code-start))
   :bind-keymap ("C-c c" . termint-claude-code-map)
   :config
-  (setq termint-backend 'vterm)
+  (setq termint-backend 'eat)  ; CRITICAL: eat backend required for sixel graphics
   (termint-define "claude-code" "claude" 
     :bracketed-paste-p t
     :send-delayed-final-ret t
@@ -42,7 +42,7 @@ None yet.
 
 ### 3. Planned Jupyter Configuration
 ```elisp
-(termint-define "jupyter-python" "jupyter console --kernel python3"
+(termint-define "euporie-python" "euporie-console --kernel-name python3"
   :bracketed-paste-p t
   :source-syntax termint-ipython-source-syntax-template)
 ```
@@ -51,7 +51,7 @@ None yet.
 
 1. **Multi-line single cells**: Bracketed paste will make multi-line code execute as single cells
 2. **Better terminal emulation**: Full ANSI support, colors, proper rendering
-3. **No escape sequence issues**: vterm handles terminal codes properly
+3. **Sixel graphics support**: eat backend provides native inline graphics display
 4. **Consistent approach**: Same pattern for Claude Code and Jupyter
 5. **Unified keybindings**: All Claude Code functions now use termint backend
 6. **Enhanced yolo support**: Separate yolo versions for continue/resume with proper --dangerously-skip-permissions flag

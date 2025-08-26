@@ -33,7 +33,7 @@ Some protocols may work better with stata_kernel than others."
                  (const "iterm"))
   :group 'euporie-termint)
 
-(defcustom euporie-termint-project-dir "/Users/vwh7mb/projects/wander2"
+(defcustom euporie-termint-project-dir "/Users/vwh7mb/projects/emacs-euporie"
   "Default project directory containing pixi environment."
   :type 'directory
   :group 'euporie-termint)
@@ -94,7 +94,8 @@ Some protocols may work better with stata_kernel than others."
                     :backend 'eat
                     :env '(("TERM" . "xterm-kitty") 
                            ("COLORTERM" . "truecolor")
-                           ("EUPORIE_GRAPHICS" . "sixel")))
+                           ("EUPORIE_GRAPHICS" . "sixel")
+                           ("PYTHONSTARTUP" . "/Users/vwh7mb/.doom.d/euporie_matplotlib_fix.py")))
     (termint-euporie-python-start)))
 
 (defun euporie-r-start ()
@@ -148,9 +149,26 @@ Some protocols may work better with stata_kernel than others."
     ;; Set up output monitoring for automatic graphics
     (when (get-buffer buffer-name)
       (with-current-buffer buffer-name
+        ;; Try multiple hook approaches since we're using eat backend
         (add-hook 'comint-output-filter-functions 
                   'euporie-termint-monitor-stata-output nil t)
-        (euporie-termint-debug-log 'info "Output monitoring enabled for automatic graphics")))))
+        (add-hook 'eat-output-filter-functions
+                  'euporie-termint-monitor-stata-output nil t)
+        ;; Store original filter before setting new one to avoid recursion
+        (when (get-buffer-process (current-buffer))
+          (let* ((process (get-buffer-process (current-buffer)))
+                 (original-filter (process-filter process)))
+            (set-process-filter process
+                              (lambda (proc output)
+                                (euporie-termint-monitor-stata-output output)
+                                ;; Call original filter if it exists and is different
+                                (when (and original-filter 
+                                          (not (eq original-filter (process-filter proc))))
+                                  (funcall original-filter proc output))))))
+        (euporie-termint-debug-log 'info "Output monitoring enabled for automatic graphics (multiple hooks)"))
+    
+    ;; Also add a timer-based file watcher as backup
+    (run-with-timer 2 1 'euporie-termint-check-for-new-stata-graphs))))
 
 ;;; Buffer Management
 
@@ -244,24 +262,55 @@ Some protocols may work better with stata_kernel than others."
       (when (string-match graphics-pattern output)
         (let ((png-file (match-string 1 output)))
           (euporie-termint-debug-log 'info "Detected PNG file creation: %s" png-file)
-          ;; Inject chafa command automatically
+          ;; Display via chafa but don't inject back to buffer (prevents recursion)
           (when (and png-file (file-exists-p png-file))
             (let ((chafa-cmd (format "! chafa \"%s\"" png-file)))
-              (euporie-termint-debug-log 'info "Auto-injecting chafa command: %s" chafa-cmd)
-              ;; Send to the stata buffer after a brief delay
+              (euporie-termint-debug-log 'info "Auto-displaying chafa command: %s" chafa-cmd)
+              ;; Use chafa directly instead of sending to buffer to avoid recursion
               (run-with-timer 0.5 nil 
-                            (lambda (cmd)
-                              (when (get-buffer "*euporie-stata*")
-                                (with-current-buffer "*euporie-stata*"
-                                  (process-send-string (get-buffer-process (current-buffer)) 
-                                                     (concat cmd "\n")))))
-                            chafa-cmd)))))))
+                            (lambda (cmd png-path)
+                              (euporie-termint-debug-log 'info "Displaying Stata graph: %s" cmd)
+                              ;; Display directly via chafa command without buffer injection
+                              (start-process "chafa-display" nil "chafa" png-path))
+                            chafa-cmd png-file)))))))
   output)
 
 ;;; Graphics File Monitor for Stata
 
 (defvar euporie-termint-stata-file-watcher nil
   "File watcher process for Stata graphics cache directory.")
+
+(defvar euporie-termint-last-stata-graph-count 0
+  "Track the last graph count to detect new graphs.")
+
+(defun euporie-termint-check-for-new-stata-graphs ()
+  "Timer-based function to check for new Stata graph files."
+  (when (and (get-buffer "*euporie-stata*")
+             (get-buffer-process "*euporie-stata*"))
+    (let* ((cache-dir "~/.stata_kernel_cache")
+           (graph-files (directory-files cache-dir nil "graph[0-9]+\\.png$"))
+           (current-count (length graph-files)))
+      
+      (when (> current-count euporie-termint-last-stata-graph-count)
+        (euporie-termint-debug-log 'info "New graph file detected - count: %d (was %d)" 
+                                   current-count euporie-termint-last-stata-graph-count)
+        
+        ;; Find the newest graph file
+        (let* ((newest-file (car (sort graph-files 
+                                      (lambda (a b)
+                                        (file-newer-than-file-p 
+                                         (expand-file-name a cache-dir)
+                                         (expand-file-name b cache-dir))))))
+               (full-path (expand-file-name newest-file cache-dir)))
+          
+          (when (and newest-file (file-exists-p full-path))
+            (let ((chafa-cmd (format "! chafa \"%s\"" full-path)))
+              (euporie-termint-debug-log 'info "Timer-based chafa injection: %s" chafa-cmd)
+              (with-current-buffer "*euporie-stata*"
+                (process-send-string (get-buffer-process (current-buffer))
+                                   (concat chafa-cmd "\n"))))))
+        
+        (setq euporie-termint-last-stata-graph-count current-count)))))
 
 (defvar euporie-termint-stata-last-graph-file nil
   "Last processed graph file to avoid duplicates.")

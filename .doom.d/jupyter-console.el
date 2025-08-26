@@ -445,7 +445,7 @@ Optionally associate it with FILE."
     
     (with-current-buffer process-buffer
       (unless (comint-check-proc process-buffer)
-        (let* ((cmd-args (list jupyter-cmd "console" "--kernel" kernel "--simple-prompt"))
+        (let* ((cmd-args (list jupyter-cmd "console" "--kernel" kernel))
                (default-directory (or (and file (file-name-directory file))
                                      default-directory))
                ;; Set PATH to include pixi environment if available

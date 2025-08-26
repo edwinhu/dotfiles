@@ -3,7 +3,7 @@
   "isResyncDeleted": false,
   "frequency": "60",
   "disabled": false,
-  "lastSyncFailed": false,
+  "lastSyncFailed": true,
   "currentSyncStatusID": 0,
   "readwiseAccessToken": "l0UF8pOlSn0AIGFfihqEM5G6ZcOk8v9w9AURYR0SOyIxkix5Pj",
   "currentGraph": {
@@ -11,7 +11,7 @@
     "name": "Logseq",
     "path": "/Users/edwinhu/Notes/Logseq"
   },
-  "lastSavedStatusID": 21741937,
+  "lastSavedStatusID": 21801104,
   "booksIDsMap": null,
   "newBooksIDsMap": {
     "34336426": "6741ee53-a3a0-4572-b4ca-bc9d6b5a0ac6",
