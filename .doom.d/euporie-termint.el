@@ -24,6 +24,15 @@ Supported protocols: sixel, kitty, kitty-unicode, iterm."
                  (const "iterm"))
   :group 'euporie-termint)
 
+(defcustom euporie-termint-stata-graphics-protocol "kitty"
+  "Graphics protocol specifically for Stata euporie console.
+Some protocols may work better with stata_kernel than others."
+  :type '(choice (const "sixel")
+                 (const "kitty") 
+                 (const "kitty-unicode")
+                 (const "iterm"))
+  :group 'euporie-termint)
+
 (defcustom euporie-termint-project-dir "/Users/vwh7mb/projects/wander2"
   "Default project directory containing pixi environment."
   :type 'directory
@@ -54,8 +63,11 @@ Supported protocols: sixel, kitty, kitty-unicode, iterm."
 
 (defun euporie-termint--build-euporie-command (kernel project-dir)
   "Build euporie-console command for KERNEL in PROJECT-DIR."
-  (let ((base-cmd (format "pixi run euporie-console --graphics=%s --kernel-name=%s" 
-                         euporie-termint-graphics-protocol kernel)))
+  (let* ((graphics-protocol (if (string= kernel "stata") 
+                               euporie-termint-stata-graphics-protocol
+                             euporie-termint-graphics-protocol))
+         (base-cmd (format "pixi run euporie-console --graphics=%s --kernel-name=%s" 
+                          graphics-protocol kernel)))
     (if (euporie-termint--check-direnv-allowed project-dir)
         (format "sh -c 'cd %s && direnv exec . %s'" project-dir base-cmd)
       (format "sh -c 'cd %s && %s'" project-dir base-cmd))))
@@ -109,12 +121,12 @@ Supported protocols: sixel, kitty, kitty-unicode, iterm."
     (termint-euporie-r-start)))
 
 (defun euporie-stata-start ()
-  "Start Stata euporie console with direnv handling."
+  "Start Stata euporie console with direnv handling and Stata-specific optimizations."
   (interactive)
   (let* ((buffer-name "*euporie-stata*")
          (smart-cmd (euporie-termint--build-euporie-command "stata" euporie-termint-project-dir)))
     
-    (euporie-termint-debug-log 'info "Starting Stata euporie console...")
+    (euporie-termint-debug-log 'info "Starting Stata euporie console with optimizations...")
     (euporie-termint-debug-log 'info "Stata command: %s" smart-cmd)
     
     ;; Kill any existing buffer first
@@ -122,13 +134,15 @@ Supported protocols: sixel, kitty, kitty-unicode, iterm."
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
     
-    ;; Define termint with proper environment for graphics
+    ;; Define termint with Stata-specific environment optimizations
     (termint-define "euporie-stata" smart-cmd
                     :bracketed-paste-p t
                     :backend 'eat
-                    :env '(("TERM" . "xterm-kitty") 
+                    :env '(("TERM" . "xterm-256color")          ; More conservative TERM for Stata
                            ("COLORTERM" . "truecolor")
-                           ("EUPORIE_GRAPHICS" . "sixel")))
+                           ("EUPORIE_GRAPHICS" . "kitty")       ; Use kitty protocol for Stata
+                           ("LANG" . "en_US.UTF-8")            ; Explicit locale for Unicode
+                           ("LC_ALL" . "en_US.UTF-8")))        ; Full locale support
     (termint-euporie-stata-start)))
 
 ;;; Buffer Management
