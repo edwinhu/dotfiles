@@ -7,43 +7,53 @@
 ;; Load R jupyter sixel integration (uses termint approach like Python)
 ;; R integration is now handled in unified jupyter-termint.el
 
-;; Load jupyter-termint for Python/R/Stata integration
-;; TEMPORARY: Using minimal version to avoid syntax errors
-(load (expand-file-name "jupyter-termint-minimal.el" doom-user-dir))
-(require 'jupyter-termint-minimal)
+;; Load euporie-termint for Python/R/Stata integration
+;; Uses euporie-console with native graphics support (sixel/kitty/iterm)
+(load (expand-file-name "euporie-termint.el" doom-user-dir))
+(require 'euporie-termint)
+
+;; Load termint-org-src for org-src edit buffer integration
+(load (expand-file-name "termint-org-src.el" doom-user-dir))
+(require 'termint-org-src)
+
+;; Load automatic Stata graphics system
+(load (expand-file-name "stata-auto-graphics.el" doom-user-dir))
+(require 'stata-auto-graphics)
 
 ;; Define language-specific wrapper functions for C-RET keybinding FIRST
 ;; These must exist for the bindings.el to work properly
 
 (defun jupyter-python ()
-  "Start Python Jupyter console using minimal implementation."
+  "Start Python euporie console with native graphics support."
   (interactive)
-  (if (fboundp 'jupyter-termint-minimal-python)
-      (jupyter-termint-minimal-python)
-    (message "ERROR: jupyter-termint-minimal not properly loaded")))
+  (if (fboundp 'euporie-python-start)
+      (euporie-python-start)
+    (message "ERROR: euporie-termint not properly loaded")))
 
 (defun jupyter-r ()
-  "Start R Jupyter console using minimal implementation."
+  "Start R euporie console with native graphics support."
   (interactive)
-  (message "ERROR: R support not implemented in minimal version"))
+  (if (fboundp 'euporie-r-start)
+      (euporie-r-start)
+    (message "ERROR: R euporie support not found")))
 
 (defun jupyter-stata ()
-  "Start Stata Jupyter console using minimal implementation."
+  "Start Stata euporie console with native graphics support."
   (interactive)
-  (if (fboundp 'jupyter-termint-minimal-stata)
-      (jupyter-termint-minimal-stata)
-    (message "ERROR: jupyter-termint-minimal not properly loaded")))
+  (if (fboundp 'euporie-stata-start)
+      (euporie-stata-start)
+    (message "ERROR: Stata euporie support not found")))
 
-;; Minimal setup - no complex functions
-(message "jupyter-termint-minimal: Basic functions available")
-(message "jupyter-termint-minimal: Available functions: %s"
+;; Euporie-termint setup with native graphics
+(message "euporie-termint: Euporie console native graphics support loaded")
+(message "euporie-termint: Available functions: %s"
          (mapcar (lambda (f) (if (fboundp f) f (format "MISSING-%s" f)))
-                 '(jupyter-termint-minimal-python jupyter-termint-minimal-stata
-                   jupyter-python jupyter-stata)))
+                 '(euporie-python-start euporie-r-start euporie-stata-start
+                   jupyter-python jupyter-r jupyter-stata)))
 
-;; Define missing functions that may not load properly from jupyter-termint.el
-(unless (fboundp 'jupyter-termint-detect-kernel)
-  (defun jupyter-termint-detect-kernel ()
+;; Define missing functions that may not load properly from euporie-termint.el
+(unless (fboundp 'euporie-termint-detect-kernel)
+  (defun euporie-termint-detect-kernel ()
     "Detect kernel from org-src buffer language or org-mode code block."
     (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
                                    (match-string 1 (buffer-name))))
@@ -817,8 +827,9 @@
   ;; For `eat-eshell-visual-command-mode'.
   (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
 
-  ;; Use standard terminal type
+  ;; Use standard terminal type and enable sixel support
   (setq eat-term-name "xterm-256color")
+  (setq eat-enable-sixel t)
   
   ;; Fix whitespace issues in eat terminal
   (add-hook 'eat-mode-hook
@@ -1255,7 +1266,13 @@ that should be monospace but are often hijacked by Apple Color Emoji."
 (defun +jupyter-termint-stata-execute (body params)
   "Execute Stata code using jupyter-termint integration."
   (message "Executing Stata code via jupyter-termint...")
-  (message "Code body: %s" (substring body 0 (min 100 (length body))))
+  (message "Code body: %s" body)
+  (message "Params: %s" params)
+  
+  ;; Check if body is valid
+  (unless (and body (stringp body) (not (string-empty-p (string-trim body))))
+    (message "ERROR: Invalid or empty Stata code body")
+    (error "Invalid or empty Stata code body"))
   
   ;; Simply call jupyter-stata function to start/reuse console
   (if (fboundp 'jupyter-stata)
@@ -1267,7 +1284,7 @@ that should be monospace but are often hijacked by Apple Color Emoji."
         (when (get-buffer "*jupyter-stata*")
           (with-current-buffer "*jupyter-stata*"
             ;; Send the code - termint handles bracketed paste
-            (termint-send-string (string-trim body))))
+            (termint-jupyter-stata-send-string (string-trim body))))
         
         ;; Return empty string for org-babel
         "")
