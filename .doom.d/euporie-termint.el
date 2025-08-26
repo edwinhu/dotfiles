@@ -138,7 +138,7 @@ Some protocols may work better with stata_kernel than others."
     (termint-define "euporie-stata" smart-cmd
                     :bracketed-paste-p t
                     :backend 'eat
-                    :env '(("TERM" . "xterm-256color")          ; More conservative TERM for Stata
+                    :env '(("TERM" . "xterm-kitty")             ; Consistent TERM with Python/R
                            ("COLORTERM" . "truecolor")
                            ("EUPORIE_GRAPHICS" . "kitty")       ; Use kitty protocol for Stata
                            ("LANG" . "en_US.UTF-8")            ; Explicit locale for Unicode
@@ -225,6 +225,64 @@ Some protocols may work better with stata_kernel than others."
         (when (buffer-live-p initial-buffer)
           (set-window-buffer (selected-window) initial-buffer))))))
 
+;;; Graphics File Monitor for Stata
+
+(defvar euporie-termint-stata-file-watcher nil
+  "File watcher process for Stata graphics cache directory.")
+
+(defvar euporie-termint-stata-last-graph-file nil
+  "Last processed graph file to avoid duplicates.")
+
+(defun euporie-termint-start-stata-file-monitor ()
+  "Start monitoring Stata cache directory for new PNG files."
+  (when euporie-termint-stata-file-watcher
+    (delete-process euporie-termint-stata-file-watcher))
+  
+  (let ((cache-dir (expand-file-name "~/.stata_kernel_cache")))
+    (when (file-directory-p cache-dir)
+      (euporie-termint-debug-log 'info "Starting file monitor for Stata graphics in: %s" cache-dir)
+      
+      ;; Use fswatch to monitor for new files (if available) or fallback to polling
+      (if (executable-find "fswatch")
+          (progn
+            (setq euporie-termint-stata-file-watcher
+                  (start-process "stata-file-monitor" nil "fswatch" "-o" cache-dir))
+            (set-process-filter euporie-termint-stata-file-watcher #'euporie-termint-stata-file-event-handler))
+        ;; Fallback: use a timer for polling
+        (run-with-timer 1 1 #'euporie-termint-check-new-stata-graphs)))))
+
+(defun euporie-termint-stata-file-event-handler (process output)
+  "Handle file system events for Stata graphics directory."
+  (when (and output (> (length (string-trim output)) 0))
+    (euporie-termint-check-new-stata-graphs)))
+
+(defun euporie-termint-check-new-stata-graphs ()
+  "Check for new graph files in Stata cache directory and display them."
+  (let* ((cache-dir (expand-file-name "~/.stata_kernel_cache"))
+         (png-files (when (file-directory-p cache-dir)
+                     (directory-files cache-dir t "\\.png$")))
+         (newest-file (when png-files
+                       (car (sort png-files (lambda (a b)
+                                             (time-less-p (nth 5 (file-attributes b))
+                                                         (nth 5 (file-attributes a)))))))))
+    
+    (when (and newest-file
+               (not (string= newest-file euporie-termint-stata-last-graph-file))
+               (get-buffer "*euporie-stata*"))  ; Only if Stata buffer is active
+      
+      (setq euporie-termint-stata-last-graph-file newest-file)
+      (euporie-termint-debug-log 'info "New Stata graph detected: %s" newest-file)
+      
+      ;; Display the graph using chafa in the Stata buffer
+      (euporie-termint-display-stata-graph newest-file))))
+
+(defun euporie-termint-display-stata-graph (png-file)
+  "Display PNG-FILE in the Stata euporie console using chafa."
+  (when (and (file-exists-p png-file) (get-buffer "*euporie-stata*"))
+    (let ((chafa-command (format "! chafa \"%s\"" png-file)))
+      (euporie-termint-debug-log 'info "Displaying Stata graph: %s" chafa-command)
+      (termint-euporie-stata-send-string chafa-command))))
+
 ;;; Code Execution
 
 (defun euporie-termint-send-code (kernel code)
@@ -242,8 +300,13 @@ Some protocols may work better with stata_kernel than others."
       ;; Display console in right window
       (euporie-termint-display-console-right buffer)
       
-      ;; Send code to console - euporie handles graphics automatically
+      ;; Send code to console
       (funcall send-func code)
+      
+      ;; Start file monitoring for Stata graphics if not already running
+      (when (and (string= kernel "stata") 
+                 (not euporie-termint-stata-file-watcher))
+        (run-with-timer 0.5 nil #'euporie-termint-start-stata-file-monitor))
       
       ;; Return buffer for further processing if needed
       buffer)))
