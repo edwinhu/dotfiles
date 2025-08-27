@@ -1,0 +1,23 @@
+#+TITLE: Test Stata Quiet Counter Fix
+
+* Test Stata Graphics After Counter Fix
+
+The fix: Use `qui global stata_kernel_graph_counter = $stata_kernel_graph_counter + 1` instead of removing the line entirely.
+
+This should:
+- ✅ Keep graphics detection working (counter still increments)
+- ✅ Hide counter messages from user (qui prefix makes it quiet)
+- ✅ Display graphics inline in euporie
+
+#+BEGIN_SRC stata
+sysuse auto, clear
+scatter mpg weight
+#+END_SRC
+
+#+BEGIN_SRC stata  
+histogram price
+#+END_SRC
+
+#+BEGIN_SRC stata
+twoway (scatter mpg weight) (lfit mpg weight)
+#+END_SRC

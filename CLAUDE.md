@@ -83,43 +83,59 @@ dotfiles/
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
 
-### Euporie Console Integration Architecture
+### Euporie Console Integration Architecture (CURRENT FOCUS: Stata Graphics)
+
+#### Current Priority: Stata Inline Graphics Issue Resolution
+
+**ACTIVE ISSUE**: Stata kernel graphics display console cleanliness in euporie environments.
+**STATUS**: ✅ **RESOLVED** - Graph counter messages eliminated, clean console output achieved.
 
 #### Technical Stack
 
 - **Process Management**: termint.el (not comint) with bracketed paste support for multi-line code blocks
 - **Terminal Backend**: eat (NEVER vterm) - vterm cannot display sixel graphics in Emacs
-- **Graphics Display**: Native euporie graphics display with automatic sixel/kitty/iterm protocol detection
-- **Console Mode**: euporie-console with native graphics support (not jupyter console)
+- **Graphics Display**: Native euporie graphics display with IPython-compatible MIME display system
+- **Console Mode**: `euporie-console --kernel-name=stata` with clean console output (no system messages)
 - **Environment**: TERM=xterm-kitty COLORTERM=truecolor for proper sixel support
 - **CRITICAL**: Always use eat backend - vterm will break inline graphics display
+
+#### Stata Kernel Graphics Pipeline (Recently Fixed)
+
+**Issue Resolved**: Graph counter messages `global stata_kernel_graph_counter = $stata_kernel_graph_counter + 1` eliminated from console output.
+
+**Current Architecture**:
+1. **Stata Command** → `scatter price mpg` (user input)
+2. **Graph Generation** → PNG files created in `.stata_kernel_cache/`  
+3. **Detection System** → `_check_and_display_graphs()` finds new graphics
+4. **MIME Display** → IPython-compatible `display_data` messages via `_send_euporie_graphics()`
+5. **Console Output** → Clean interface without system messages (like Python/R kernels)
+
+**Files Modified**:
+- `stata_kernel/kernel.py` - IPython MIME compatibility, streamlined graphics detection
+- `stata_kernel/stata_session.py` - Fixed infinite loops, eliminated duplicate displays  
+- `stata_kernel/code_manager.py` - Suppressed counter messages with `quietly` prefix
+- `stata_kernel/graphics.py` - Enhanced environment detection
 
 #### Key Files
 
 - **Primary**: `euporie-termint.el` - Main implementation for Python, R, and Stata euporie integration
-- **Deprecated**: `jupyter-console.el` - Should be removed, replaced by euporie approach
-- **Deprecated**: `jupyter-termint.el` - Replaced by euporie-termint.el for native graphics
-
-#### Why These Architectural Choices
-
-- **termint over comint**: Better multi-line handling with bracketed paste support for code blocks
-- **eat over vterm**: CRITICAL - vterm in Emacs cannot display sixel graphics inline - eat provides native sixel support
-- **euporie-console**: Native terminal graphics support with automatic protocol detection (sixel/kitty/iterm)
-- **No manual graphics commands**: euporie automatically detects and displays plots inline
-- **Enhanced Stata kernel**: Uses stata_kernel_euporie fork for native Stata graphics support
+- **Stata Graphics Core**: Modified `stata_kernel/kernel.py` with IPython-compatible MIME display
+- **Test Suite**: Comprehensive unit tests in `.doom.d/test-*-stata-*.el` files
 
 #### Implementation Pattern
 
-All three languages (Python, R, Stata) use the unified euporie approach:
+**Stata Kernel (Recently Fixed)**:
+1. `termint-define` with eat backend and bracketed paste enabled
+2. `pixi run euporie-console --kernel-name=stata` (clean console output)
+3. Commands: `sysuse auto` → `scatter price mpg` (no counter messages)
+4. Graphics: Automatic inline display via euporie's native protocols
+5. **Result**: Professional console experience matching Python/R kernels
 
-1. `termint-define` with eat backend (NEVER vterm) and bracketed paste enabled
-2. `pixi run euporie-console --graphics=sixel --kernel-name={python3|ir|stata_kernel_euporie}`
-3. Environment variables: `TERM=xterm-kitty COLORTERM=truecolor` for graphics support
-4. **CRITICAL**: Terminal backend must be eat - vterm will break graphics
-4. Native graphics display with automatic protocol detection:
-   - Python: `plt.plot()` → automatic inline display
-   - R: `ggplot()` → automatic inline display  
-   - Stata: `graph twoway` → automatic inline display via enhanced kernel
+**Python/R Kernels** (Working Reference):
+1. `termint-define` with eat backend and bracketed paste enabled  
+2. `pixi run euporie-console --kernel-name={python3|ir}`
+3. Environment variables: `TERM=xterm-kitty COLORTERM=truecolor`
+4. Native graphics display with automatic protocol detection
 
 #### Buffer Management
 
@@ -127,6 +143,7 @@ All three languages (Python, R, Stata) use the unified euporie approach:
 - Process management through termint with eat backend (NEVER vterm)
 - Split-window display with automatic plot rendering in same buffer
 - **CRITICAL**: eat backend required for sixel graphics - vterm will not work
+- **Stata-Specific**: Clean console output without graph counter pollution
 
 ### Claude Code Integration
 

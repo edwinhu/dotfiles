@@ -223,12 +223,13 @@ This replicates the user's working manual approach."
 
 ;;; Auto-initialization when termint is loaded
 
-(with-eval-after-load 'termint
-  (stata-auto-graphics-setup))
+;; DISABLED: Conflicts with MIME-based display system
+;; (with-eval-after-load 'termint
+;;   (stata-auto-graphics-setup))
 
 ;; Also try to set up immediately if termint is already loaded
-(when (featurep 'termint)
-  (stata-auto-graphics-setup))
+;; (when (featurep 'termint)
+;;   (stata-auto-graphics-setup))
 
 (provide 'stata-auto-graphics)
 ;;; stata-auto-graphics.el ends here

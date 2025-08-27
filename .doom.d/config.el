@@ -80,8 +80,8 @@
   ;; For `eat-eshell-visual-command-mode'.
   (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
 
-  ;; Use standard terminal type
-  (setq eat-term-name "xterm-256color")
+  ;; Use eat's native terminal type with graphics support
+  (setq eat-term-name 'eat-term-get-suitable-term-name)
   
   ;; Fix whitespace issues in eat terminal
   (add-hook 'eat-mode-hook

@@ -92,7 +92,7 @@ Some protocols may work better with stata_kernel than others."
     (termint-define "euporie-python" smart-cmd
                     :bracketed-paste-p t
                     :backend 'eat
-                    :env '(("TERM" . "xterm-kitty") 
+                    :env '(("TERM" . "eat-truecolor") 
                            ("COLORTERM" . "truecolor")
                            ("EUPORIE_GRAPHICS" . "sixel")
                            ("PYTHONSTARTUP" . "/Users/vwh7mb/.doom.d/euporie_matplotlib_fix.py")))
@@ -116,7 +116,7 @@ Some protocols may work better with stata_kernel than others."
     (termint-define "euporie-r" smart-cmd
                     :bracketed-paste-p t
                     :backend 'eat
-                    :env '(("TERM" . "xterm-kitty") 
+                    :env '(("TERM" . "eat-truecolor") 
                            ("COLORTERM" . "truecolor")
                            ("EUPORIE_GRAPHICS" . "sixel")))
     (termint-euporie-r-start)))
@@ -139,9 +139,9 @@ Some protocols may work better with stata_kernel than others."
     (termint-define "euporie-stata" smart-cmd
                     :bracketed-paste-p t
                     :backend 'eat
-                    :env '(("TERM" . "xterm-kitty")             ; Consistent TERM with Python/R
+                    :env '(("TERM" . "eat-truecolor")           ; Use eat's native term with graphics support
                            ("COLORTERM" . "truecolor")
-                           ("EUPORIE_GRAPHICS" . "kitty")       ; Use kitty protocol for Stata
+                           ("EUPORIE_GRAPHICS" . "sixel")       ; Use sixel protocol for consistency
                            ("LANG" . "en_US.UTF-8")            ; Explicit locale for Unicode
                            ("LC_ALL" . "en_US.UTF-8")))        ; Full locale support
     (termint-euporie-stata-start)
@@ -257,22 +257,15 @@ Some protocols may work better with stata_kernel than others."
 
 (defun euporie-termint-monitor-stata-output (output)
   "Monitor Stata terminal output and automatically display graphics."
-  (when (and output (stringp output))
-    (let ((graphics-pattern "file \\(.+\\.png\\) written in PNG format"))
-      (when (string-match graphics-pattern output)
-        (let ((png-file (match-string 1 output)))
-          (euporie-termint-debug-log 'info "Detected PNG file creation: %s" png-file)
-          ;; Display via chafa but don't inject back to buffer (prevents recursion)
-          (when (and png-file (file-exists-p png-file))
-            (let ((chafa-cmd (format "! chafa \"%s\"" png-file)))
-              (euporie-termint-debug-log 'info "Auto-displaying chafa command: %s" chafa-cmd)
-              ;; Use chafa directly instead of sending to buffer to avoid recursion
-              (run-with-timer 0.5 nil 
-                            (lambda (cmd png-path)
-                              (euporie-termint-debug-log 'info "Displaying Stata graph: %s" cmd)
-                              ;; Display directly via chafa command without buffer injection
-                              (start-process "chafa-display" nil "chafa" png-path))
-                            chafa-cmd png-file)))))))
+  ;; DISABLED: Function temporarily disabled to prevent void-variable error
+  ;; ;; Keep PNG detection for MIME system coordination, but disable chafa injection
+  ;; (when (and output (stringp output))
+  ;;   (let ((graphics-pattern "file \\(.+\\.png\\) written in PNG format"))
+  ;;     (when (string-match graphics-pattern output)
+  ;;       (let ((png-file (match-string 1 output)))
+  ;;         (euporie-termint-debug-log 'info "Detected PNG file creation: %s" png-file)
+  ;;         ;; DISABLED: chafa injection - let MIME system handle display
+  ;;         ))))
   output)
 
 ;;; Graphics File Monitor for Stata
@@ -303,12 +296,16 @@ Some protocols may work better with stata_kernel than others."
                                          (expand-file-name b cache-dir))))))
                (full-path (expand-file-name newest-file cache-dir)))
           
+          ;; Keep file detection for MIME system coordination, disable chafa injection
           (when (and newest-file (file-exists-p full-path))
-            (let ((chafa-cmd (format "! chafa \"%s\"" full-path)))
-              (euporie-termint-debug-log 'info "Timer-based chafa injection: %s" chafa-cmd)
-              (with-current-buffer "*euporie-stata*"
-                (process-send-string (get-buffer-process (current-buffer))
-                                   (concat chafa-cmd "\n"))))))
+            (euporie-termint-debug-log 'info "Timer detected new graph: %s" full-path)
+            ;; DISABLED: chafa injection - let MIME system handle display
+            ;; (let ((chafa-cmd (format "! chafa \"%s\"" full-path)))
+            ;;   (euporie-termint-debug-log 'info "Timer-based chafa injection: %s" chafa-cmd)
+            ;;   (with-current-buffer "*euporie-stata*"
+            ;;     (process-send-string (get-buffer-process (current-buffer))
+            ;;                        (concat chafa-cmd "\n"))))
+            ))
         
         (setq euporie-termint-last-stata-graph-count current-count)))))
 
@@ -358,16 +355,18 @@ Some protocols may work better with stata_kernel than others."
       
       (setq euporie-termint-stata-last-graph-file newest-file)
       (euporie-termint-debug-log 'info "New Stata graph detected: %s" newest-file)
-      
-      ;; Display the graph using chafa in the Stata buffer
-      (euporie-termint-display-stata-graph newest-file))))
+      ;; DISABLED: chafa display - let MIME system handle display
+      ;; (euporie-termint-display-stata-graph newest-file)
+      )))
 
 (defun euporie-termint-display-stata-graph (png-file)
-  "Display PNG-FILE in the Stata euporie console using chafa."
-  (when (and (file-exists-p png-file) (get-buffer "*euporie-stata*"))
-    (let ((chafa-command (format "! chafa \"%s\"" png-file)))
-      (euporie-termint-debug-log 'info "Displaying Stata graph: %s" chafa-command)
-      (termint-euporie-stata-send-string chafa-command))))
+  "DISABLED: Display PNG-FILE in the Stata euporie console using chafa."
+  ;; DISABLED: Using MIME-based euporie integration instead of chafa
+  ;; (when (and (file-exists-p png-file) (get-buffer "*euporie-stata*"))
+  ;;   (let ((chafa-command (format "! chafa \"%s\"" png-file)))
+  ;;     (euporie-termint-debug-log 'info "Displaying Stata graph: %s" chafa-command)
+  ;;     (termint-euporie-stata-send-string chafa-command)))
+  nil)
 
 ;;; Code Execution
 
