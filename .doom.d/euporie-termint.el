@@ -191,13 +191,39 @@ Some protocols may work better with stata_kernel than others."
       ;; Need to start new console
       (progn
         (funcall start-func)
-        ;; Wait for buffer creation
-        (let ((max-wait 15) (wait-count 0))
+        ;; Wait for buffer creation and kernel readiness
+        (let ((max-wait 30) (wait-count 0) (buffer nil))
+          ;; First, wait for buffer creation
           (while (and (< wait-count max-wait)
-                     (not (get-buffer buffer-name)))
+                     (not (setq buffer (get-buffer buffer-name))))
             (sleep-for 0.5)
-            (setq wait-count (1+ wait-count))))
+            (setq wait-count (1+ wait-count)))
+          
+          ;; Then wait for kernel to be ready (look for prompt)
+          (when buffer
+            (setq wait-count 0)
+            (while (and (< wait-count max-wait)
+                       (not (euporie-termint-kernel-ready-p buffer)))
+              (sleep-for 0.5)
+              (setq wait-count (1+ wait-count)))
+            (euporie-termint-debug-log 'info "Kernel ready after %d attempts" wait-count)))
         (get-buffer buffer-name)))))
+
+;;; Kernel Readiness Detection
+
+(defun euporie-termint-kernel-ready-p (buffer)
+  "Check if kernel in BUFFER is ready to receive commands."
+  (when (and buffer (buffer-live-p buffer))
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-max))
+        (let ((content (buffer-substring-no-properties 
+                       (max (point-min) (- (point-max) 1000)) (point-max))))
+          ;; Look for kernel-specific prompts
+          (or (string-match-p "In \\[[0-9]+\\]: *$" content)      ; Python/R/Stata jupyter prompt
+              (string-match-p "> *$" content)                     ; R prompt fallback
+              (string-match-p "\\. *$" content)                   ; Stata prompt fallback
+              (string-match-p ">>> *$" content)))))))             ; Python prompt fallback
 
 ;;; Language Detection
 

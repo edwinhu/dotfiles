@@ -6,7 +6,6 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(helm-minibuffer-history-key "M-p")
- '(package-selected-packages '(gptel))
  '(safe-local-variable-values
    '((R-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/R")
      (jupyter-command . "/Users/vwh7mb/projects/wander2/.pixi/envs/default/bin/jupyter")
