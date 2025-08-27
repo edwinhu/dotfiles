@@ -191,22 +191,22 @@ Some protocols may work better with stata_kernel than others."
       ;; Need to start new console
       (progn
         (funcall start-func)
-        ;; Wait for buffer creation and kernel readiness
-        (let ((max-wait 30) (wait-count 0) (buffer nil))
-          ;; First, wait for buffer creation
-          (while (and (< wait-count max-wait)
+        ;; Wait for buffer creation and kernel readiness  
+        (let ((max-wait-buffer 20) (max-wait-kernel 8) (wait-count 0) (buffer nil))
+          ;; First, wait for buffer creation (up to 10 seconds)
+          (while (and (< wait-count max-wait-buffer)
                      (not (setq buffer (get-buffer buffer-name))))
             (sleep-for 0.5)
             (setq wait-count (1+ wait-count)))
           
-          ;; Then wait for kernel to be ready (look for prompt)
+          ;; Then wait for kernel to be ready (up to 4 seconds only)
           (when buffer
             (setq wait-count 0)
-            (while (and (< wait-count max-wait)
+            (while (and (< wait-count max-wait-kernel)
                        (not (euporie-termint-kernel-ready-p buffer)))
               (sleep-for 0.5)
               (setq wait-count (1+ wait-count)))
-            (euporie-termint-debug-log 'info "Kernel ready after %d attempts" wait-count)))
+            (euporie-termint-debug-log 'info "Kernel ready after %d attempts (max %d)" wait-count max-wait-kernel)))
         (get-buffer buffer-name)))))
 
 ;;; Kernel Readiness Detection
@@ -218,12 +218,18 @@ Some protocols may work better with stata_kernel than others."
       (save-excursion
         (goto-char (point-max))
         (let ((content (buffer-substring-no-properties 
-                       (max (point-min) (- (point-max) 1000)) (point-max))))
-          ;; Look for kernel-specific prompts
-          (or (string-match-p "In \\[[0-9]+\\]: *$" content)      ; Python/R/Stata jupyter prompt
-              (string-match-p "> *$" content)                     ; R prompt fallback
-              (string-match-p "\\. *$" content)                   ; Stata prompt fallback
-              (string-match-p ">>> *$" content)))))))             ; Python prompt fallback
+                       (max (point-min) (- (point-max) 2000)) (point-max))))
+          ;; Debug: log what we're seeing
+          (euporie-termint-debug-log 'info "Checking kernel readiness - last 200 chars: %s" 
+                                    (substring content (max 0 (- (length content) 200))))
+          ;; Look for any reasonable prompt indicators (more permissive)
+          (or (string-match-p "In \\[[0-9]*\\]:" content)         ; Jupyter prompt (with or without space)
+              (string-match-p ">>>" content)                      ; Python prompt
+              (string-match-p "^[[:space:]]*>" content)           ; R prompt (with whitespace)
+              (string-match-p "^[[:space:]]*\\." content)         ; Stata prompt (with whitespace)
+              (string-match-p "euporie" content)                  ; Euporie started indicator
+              ;; Fallback: if we see any text output, assume it's ready
+              (> (length (string-trim content)) 50)))))))         ; Has substantial content             ; Python prompt fallback
 
 ;;; Language Detection
 

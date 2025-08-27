@@ -3,7 +3,7 @@
   "isResyncDeleted": false,
   "frequency": "60",
   "disabled": false,
-  "lastSyncFailed": false,
+  "lastSyncFailed": true,
   "currentSyncStatusID": 0,
   "readwiseAccessToken": "l0UF8pOlSn0AIGFfihqEM5G6ZcOk8v9w9AURYR0SOyIxkix5Pj",
   "currentGraph": {
