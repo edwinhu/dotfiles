@@ -52,10 +52,8 @@
        ;; If we're in org-src edit buffer, use the org-src specific handler
        ((and in-org-src (fboundp 'termint-org-src-send-line-or-paragraph-or-fun-or-region))
         (termint-org-src-send-line-or-paragraph-or-fun-or-region))
-       ((fboundp 'jupyter-termint-send-stata-with-split)
-        (jupyter-termint-send-stata-with-split))
-       ((fboundp 'jupyter-termint-send-stata)
-        (jupyter-termint-send-stata))
+       ((fboundp 'euporie-termint-send-region-or-line)
+        (euporie-termint-send-region-or-line))
        ((fboundp 'org-babel-execute-src-block)
         (message "Using org-babel fallback for Stata")
         (org-babel-execute-src-block))
@@ -71,8 +69,8 @@
        ;; If we're in org-src edit buffer, use the org-src specific handler
        ((and in-org-src (fboundp 'termint-org-src-send-line-or-paragraph-or-fun-or-region))
         (termint-org-src-send-line-or-paragraph-or-fun-or-region))
-       ((fboundp 'jupyter-termint-send-python-with-split)
-        (jupyter-termint-send-python-with-split))
+       ((fboundp 'euporie-termint-send-region-or-line)
+        (euporie-termint-send-region-or-line))
        (t
         (message "Python handler not available"))))
      
@@ -85,8 +83,8 @@
        ;; If we're in org-src edit buffer, use the org-src specific handler
        ((and in-org-src (fboundp 'termint-org-src-send-line-or-paragraph-or-fun-or-region))
         (termint-org-src-send-line-or-paragraph-or-fun-or-region))
-       ((fboundp 'jupyter-termint-send-r)
-        (jupyter-termint-send-r))
+       ((fboundp 'euporie-termint-send-region-or-line)
+        (euporie-termint-send-region-or-line))
        (t
         (message "R handler not available"))))
      
@@ -98,7 +96,7 @@
         (newline))))))
 
 ;; Create keymap for C-RET override with maximum priority
-(defvar jupyter-termint-override-keymap
+(defvar euporie-termint-override-keymap
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-RET") #'smart-org-src-send)
     (define-key map (kbd "C-<return>") #'smart-org-src-send)
@@ -106,13 +104,13 @@
   "Keymap for jupyter-termint C-RET override.")
 
 ;; Recursion guard
-(defvar jupyter-termint--in-advice nil
+(defvar euporie-termint--in-advice nil
   "Prevent recursive calls to jupyter-termint advice.")
 
 ;; NUCLEAR OPTION: Advice +default/newline-below to intercept C-RET
-(defun jupyter-termint--intercept-newline-below (orig-func &rest args)
+(defun euporie-termint--intercept-newline-below (orig-func &rest args)
   "Intercept +default/newline-below and call jupyter instead when appropriate."
-  (if jupyter-termint--in-advice
+  (if euporie-termint--in-advice
       ;; If already in advice, just call original function
       (apply orig-func args)
     ;; Enhanced context detection with multiple fallback approaches
@@ -142,7 +140,7 @@
       (if (and detected-lang
                (member (downcase detected-lang) '("python" "stata" "r"))
                (or in-org-src in-src-block))
-          (let ((jupyter-termint--in-advice t))
+          (let ((euporie-termint--in-advice t))
             ;; Debug enabled for troubleshooting
             (message "✓ Calling jupyter for %s" detected-lang)
             (smart-org-src-send))
@@ -152,12 +150,12 @@
           (apply orig-func args))))))
 
 ;; Install the advice immediately - aggressive override of C-RET
-(advice-add '+default/newline-below :around #'jupyter-termint--intercept-newline-below)
+(advice-add '+default/newline-below :around #'euporie-termint--intercept-newline-below)
 
 ;; Also intercept org-mode's C-RET binding
-(defun jupyter-termint--intercept-org-insert-item (orig-func &rest args)
+(defun euporie-termint--intercept-org-insert-item (orig-func &rest args)
   "Intercept +org/insert-item-below and call jupyter instead when appropriate."
-  (if jupyter-termint--in-advice
+  (if euporie-termint--in-advice
       ;; If already in advice, just call original function  
       (apply orig-func args)
     ;; Use the same detection logic as newline-below
@@ -171,14 +169,14 @@
       (if (and detected-lang
                (member (downcase detected-lang) '("python" "stata" "r"))
                (or in-org-src in-src-block))
-          (let ((jupyter-termint--in-advice t))
+          (let ((euporie-termint--in-advice t))
             (message "✓ Org-mode C-RET intercepted for %s" detected-lang)
             (smart-org-src-send))
         (progn
           (message "✗ Using original +org/insert-item-below")
           (apply orig-func args))))))
 
-(advice-add '+org/insert-item-below :around #'jupyter-termint--intercept-org-insert-item)
+(advice-add '+org/insert-item-below :around #'euporie-termint--intercept-org-insert-item)
 
 ;; Terminal testing keybindings
 (map! "C-c t v" #'vterm

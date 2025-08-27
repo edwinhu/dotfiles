@@ -184,8 +184,7 @@ Returns a cons cell (START . END)."
       (kill-buffer "*jupyter-stata*")))
   
   ;; Start monitoring before console starts
-  (when (fboundp 'jupyter-termint-start-stata-graph-monitoring)
-    (jupyter-termint-start-stata-graph-monitoring))
+  ;; Stata graph monitoring is now handled by euporie-termint.el
   
   ;; Define and start with smart command
   (termint-define "jupyter-stata" 
