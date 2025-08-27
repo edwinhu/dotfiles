@@ -1,1 +1,0 @@
-Create a testing subagent that executes the comprehensive Jupyter Stata integration test protocol following the instructions in test-protocol-agent.md. The agent should systematically test both C-RET functionality and emacsclient image display from a fresh Emacs startup, documenting detailed results for each test phase and providing screenshots as evidence.
