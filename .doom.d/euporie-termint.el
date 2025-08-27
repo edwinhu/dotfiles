@@ -283,22 +283,7 @@ Some protocols may work better with stata_kernel than others."
           (set-window-buffer (selected-window) initial-buffer))))))
 
 ;;; Terminal Output Monitor for Automatic Graphics
-
-(defvar euporie-termint-stata-output-filter-hook nil
-  "Hook for monitoring Stata terminal output for automatic graphics.")
-
-(defun euporie-termint-monitor-stata-output (output)
-  "Monitor Stata terminal output and automatically display graphics."
-  ;; DISABLED: Function temporarily disabled to prevent void-variable error
-  ;; ;; Keep PNG detection for MIME system coordination, but disable chafa injection
-  ;; (when (and output (stringp output))
-  ;;   (let ((graphics-pattern "file \\(.+\\.png\\) written in PNG format"))
-  ;;     (when (string-match graphics-pattern output)
-  ;;       (let ((png-file (match-string 1 output)))
-  ;;         (euporie-termint-debug-log 'info "Detected PNG file creation: %s" png-file)
-  ;;         ;; DISABLED: chafa injection - let MIME system handle display
-  ;;         ))))
-  output)
+;; NOTE: Not needed - euporie handles all graphics natively
 
 ;;; Graphics File Monitor for Stata
 
@@ -328,16 +313,9 @@ Some protocols may work better with stata_kernel than others."
                                          (expand-file-name b cache-dir))))))
                (full-path (expand-file-name newest-file cache-dir)))
           
-          ;; Keep file detection for MIME system coordination, disable chafa injection
+          ;; Keep file detection for MIME system coordination
           (when (and newest-file (file-exists-p full-path))
-            (euporie-termint-debug-log 'info "Timer detected new graph: %s" full-path)
-            ;; DISABLED: chafa injection - let MIME system handle display
-            ;; (let ((chafa-cmd (format "! chafa \"%s\"" full-path)))
-            ;;   (euporie-termint-debug-log 'info "Timer-based chafa injection: %s" chafa-cmd)
-            ;;   (with-current-buffer "*euporie-stata*"
-            ;;     (process-send-string (get-buffer-process (current-buffer))
-            ;;                        (concat chafa-cmd "\n"))))
-            ))
+            (euporie-termint-debug-log 'info "Timer detected new graph: %s" full-path)))
         
         (setq euporie-termint-last-stata-graph-count current-count)))))
 
@@ -387,18 +365,8 @@ Some protocols may work better with stata_kernel than others."
       
       (setq euporie-termint-stata-last-graph-file newest-file)
       (euporie-termint-debug-log 'info "New Stata graph detected: %s" newest-file)
-      ;; DISABLED: chafa display - let MIME system handle display
-      ;; (euporie-termint-display-stata-graph newest-file)
+      ;; Graphics handled by euporie natively - no manual display needed
       )))
-
-(defun euporie-termint-display-stata-graph (png-file)
-  "DISABLED: Display PNG-FILE in the Stata euporie console using chafa."
-  ;; DISABLED: Using MIME-based euporie integration instead of chafa
-  ;; (when (and (file-exists-p png-file) (get-buffer "*euporie-stata*"))
-  ;;   (let ((chafa-command (format "! chafa \"%s\"" png-file)))
-  ;;     (euporie-termint-debug-log 'info "Displaying Stata graph: %s" chafa-command)
-  ;;     (termint-euporie-stata-send-string chafa-command)))
-  nil)
 
 ;;; Code Execution
 
