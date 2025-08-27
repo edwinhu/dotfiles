@@ -147,25 +147,7 @@ Some protocols may work better with stata_kernel than others."
     (termint-euporie-stata-start)
     
     ;; Set up output monitoring for automatic graphics
-    (when (get-buffer buffer-name)
-      (with-current-buffer buffer-name
-        ;; Try multiple hook approaches since we're using eat backend
-        (add-hook 'comint-output-filter-functions 
-                  'euporie-termint-monitor-stata-output nil t)
-        (add-hook 'eat-output-filter-functions
-                  'euporie-termint-monitor-stata-output nil t)
-        ;; Store original filter before setting new one to avoid recursion
-        (when (get-buffer-process (current-buffer))
-          (let* ((process (get-buffer-process (current-buffer)))
-                 (original-filter (process-filter process)))
-            (set-process-filter process
-                              (lambda (proc output)
-                                (euporie-termint-monitor-stata-output output)
-                                ;; Call original filter if it exists and is different
-                                (when (and original-filter 
-                                          (not (eq original-filter (process-filter proc))))
-                                  (funcall original-filter proc output))))))
-        (euporie-termint-debug-log 'info "Output monitoring enabled for automatic graphics (multiple hooks)"))
+    ;; No output monitoring needed - euporie handles graphics natively
     
     ;; Also add a timer-based file watcher as backup
     (run-with-timer 2 1 'euporie-termint-check-for-new-stata-graphs))))
@@ -199,37 +181,13 @@ Some protocols may work better with stata_kernel than others."
             (sleep-for 0.5)
             (setq wait-count (1+ wait-count)))
           
-          ;; Then wait for kernel to be ready (up to 4 seconds only)
+          ;; Then wait a short time for kernel to initialize (simplified approach)
           (when buffer
-            (setq wait-count 0)
-            (while (and (< wait-count max-wait-kernel)
-                       (not (euporie-termint-kernel-ready-p buffer)))
-              (sleep-for 0.5)
-              (setq wait-count (1+ wait-count)))
-            (euporie-termint-debug-log 'info "Kernel ready after %d attempts (max %d)" wait-count max-wait-kernel)))
+            (sleep-for 2)  ; Simple 2-second wait instead of complex detection
+            (euporie-termint-debug-log 'info "Kernel initialization wait complete")))
         (get-buffer buffer-name)))))
 
-;;; Kernel Readiness Detection
-
-(defun euporie-termint-kernel-ready-p (buffer)
-  "Check if kernel in BUFFER is ready to receive commands."
-  (when (and buffer (buffer-live-p buffer))
-    (with-current-buffer buffer
-      (save-excursion
-        (goto-char (point-max))
-        (let ((content (buffer-substring-no-properties 
-                       (max (point-min) (- (point-max) 2000)) (point-max))))
-          ;; Debug: log what we're seeing
-          (euporie-termint-debug-log 'info "Checking kernel readiness - last 200 chars: %s" 
-                                    (substring content (max 0 (- (length content) 200))))
-          ;; Look for any reasonable prompt indicators (more permissive)
-          (or (string-match-p "In \\[[0-9]*\\]:" content)         ; Jupyter prompt (with or without space)
-              (string-match-p ">>>" content)                      ; Python prompt
-              (string-match-p "^[[:space:]]*>" content)           ; R prompt (with whitespace)
-              (string-match-p "^[[:space:]]*\\." content)         ; Stata prompt (with whitespace)
-              (string-match-p "euporie" content)                  ; Euporie started indicator
-              ;; Fallback: if we see any text output, assume it's ready
-              (> (length (string-trim content)) 50)))))))         ; Has substantial content             ; Python prompt fallback
+;;; Simple kernel initialization (no complex detection needed)
 
 ;;; Language Detection
 
