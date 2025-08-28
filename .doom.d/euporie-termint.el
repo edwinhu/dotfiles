@@ -94,9 +94,18 @@ Some protocols may work better with stata_kernel than others."
                     :backend 'eat
                     :env '(("TERM" . "eat-truecolor") 
                            ("COLORTERM" . "truecolor")
-                           ("EUPORIE_GRAPHICS" . "sixel")
-                           ("PYTHONSTARTUP" . "/Users/vwh7mb/.doom.d/euporie_matplotlib_fix.py")))
-    (termint-euporie-python-start)))
+                           ("EUPORIE_GRAPHICS" . "sixel")))
+    ;; Start the termint session with error handling
+    (condition-case err
+        (termint-euporie-python-start)
+      (error 
+       (euporie-termint-debug-log 'error "Failed to start Python termint: %s" err)
+       (message "Warning: Failed to start Python euporie console: %s" err)))
+    
+    ;; Then wait a short time for kernel to initialize (simplified approach)
+    (when (get-buffer buffer-name)
+      (sleep-for 2)  ; Simple 2-second wait instead of complex detection
+      (euporie-termint-debug-log 'info "Kernel initialization wait complete"))))
 
 (defun euporie-r-start ()
   "Start R euporie console with direnv handling."
@@ -119,7 +128,17 @@ Some protocols may work better with stata_kernel than others."
                     :env '(("TERM" . "eat-truecolor") 
                            ("COLORTERM" . "truecolor")
                            ("EUPORIE_GRAPHICS" . "sixel")))
-    (termint-euporie-r-start)))
+    ;; Start the termint session with error handling
+    (condition-case err
+        (termint-euporie-r-start)
+      (error 
+       (euporie-termint-debug-log 'error "Failed to start R termint: %s" err)
+       (message "Warning: Failed to start R euporie console: %s" err)))
+    
+    ;; Then wait a short time for kernel to initialize (simplified approach)
+    (when (get-buffer buffer-name)
+      (sleep-for 2)  ; Simple 2-second wait instead of complex detection
+      (euporie-termint-debug-log 'info "Kernel initialization wait complete"))))
 
 (defun euporie-stata-start ()
   "Start Stata euporie console with direnv handling and Stata-specific optimizations."
@@ -144,13 +163,23 @@ Some protocols may work better with stata_kernel than others."
                            ("EUPORIE_GRAPHICS" . "sixel")       ; Use sixel protocol for consistency
                            ("LANG" . "en_US.UTF-8")            ; Explicit locale for Unicode
                            ("LC_ALL" . "en_US.UTF-8")))        ; Full locale support
-    (termint-euporie-stata-start)
+    ;; Start the termint session with error handling
+    (condition-case err
+        (termint-euporie-stata-start)
+      (error 
+       (euporie-termint-debug-log 'error "Failed to start Stata termint: %s" err)
+       (message "Warning: Failed to start Stata euporie console: %s" err)))
     
     ;; Set up output monitoring for automatic graphics
     ;; No output monitoring needed - euporie handles graphics natively
     
     ;; Also add a timer-based file watcher as backup
-    (run-with-timer 2 1 'euporie-termint-check-for-new-stata-graphs))))
+    (run-with-timer 2 1 'euporie-termint-check-for-new-stata-graphs)
+    
+    ;; Then wait a short time for kernel to initialize (simplified approach)
+    (when (get-buffer buffer-name)
+      (sleep-for 2)  ; Simple 2-second wait instead of complex detection
+      (euporie-termint-debug-log 'info "Kernel initialization wait complete"))))
 
 ;;; Buffer Management
 
@@ -186,8 +215,6 @@ Some protocols may work better with stata_kernel than others."
             (sleep-for 2)  ; Simple 2-second wait instead of complex detection
             (euporie-termint-debug-log 'info "Kernel initialization wait complete")))
         (get-buffer buffer-name)))))
-
-;;; Simple kernel initialization (no complex detection needed)
 
 ;;; Language Detection
 
@@ -239,9 +266,6 @@ Some protocols may work better with stata_kernel than others."
         
         (when (buffer-live-p initial-buffer)
           (set-window-buffer (selected-window) initial-buffer))))))
-
-;;; Terminal Output Monitor for Automatic Graphics
-;; NOTE: Not needed - euporie handles all graphics natively
 
 ;;; Graphics File Monitor for Stata
 
@@ -405,6 +429,23 @@ Some protocols may work better with stata_kernel than others."
       ;; For org-babel, we don't return output as euporie handles display
       "")))
 
+;;; Buffer keybinding setup helper function
+
+(defun euporie-termint-setup-buffer-keybinding ()
+  "Set up C-RET keybinding for the current org-src buffer."
+  (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
+    
+    ;; Unbind in all evil states for this buffer
+    (evil-local-set-key 'insert (kbd "C-<return>") nil)
+    (evil-local-set-key 'normal (kbd "C-<return>") nil)
+    (evil-local-set-key 'visual (kbd "C-<return>") nil)
+    
+    ;; Bind our function
+    (evil-local-set-key 'insert (kbd "C-<return>") #'euporie-termint-send-region-or-line)
+    (evil-local-set-key 'normal (kbd "C-<return>") #'euporie-termint-send-region-or-line)
+    (evil-local-set-key 'visual (kbd "C-<return>") #'euporie-termint-send-region-or-line)
+    (local-set-key (kbd "C-<return>") #'euporie-termint-send-region-or-line)))
+
 ;;; Keybinding Setup
 
 (defun euporie-termint-setup-keybinding ()
@@ -413,22 +454,6 @@ Some protocols may work better with stata_kernel than others."
   ;; Unbind Doom default C-RET keybinding globally
   (map! "C-<return>" nil)
   
-  ;; Common function to set up keybindings in org-src buffers
-  (defun euporie-termint-setup-buffer-keybinding ()
-    "Set up C-RET keybinding for the current org-src buffer."
-    (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
-      
-      ;; Unbind in all evil states for this buffer
-      (evil-local-set-key 'insert (kbd "C-<return>") nil)
-      (evil-local-set-key 'normal (kbd "C-<return>") nil)
-      (evil-local-set-key 'visual (kbd "C-<return>") nil)
-      
-      ;; Bind our function
-      (evil-local-set-key 'insert (kbd "C-<return>") #'euporie-termint-send-region-or-line)
-      (evil-local-set-key 'normal (kbd "C-<return>") #'euporie-termint-send-region-or-line)
-      (evil-local-set-key 'visual (kbd "C-<return>") #'euporie-termint-send-region-or-line)
-      (local-set-key (kbd "C-<return>") #'euporie-termint-send-region-or-line)))
-
   ;; Set up hooks for all supported languages
   (add-hook 'python-mode-hook #'euporie-termint-setup-buffer-keybinding)
   (add-hook 'ess-r-mode-hook #'euporie-termint-setup-buffer-keybinding)
@@ -459,9 +484,8 @@ Some protocols may work better with stata_kernel than others."
 
 ;;; Initialization
 
-(with-eval-after-load 'termint
-  (euporie-termint-setup)
-  (euporie-termint-setup-keybinding))
+;; Initialize after module is loaded
+;; Note: Call euporie-termint-setup manually after loading this module
 
 (provide 'euporie-termint)
 ;;; euporie-termint.el ends here

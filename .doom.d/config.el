@@ -7,13 +7,24 @@
                        (or (bound-and-true-p doom-user-dir)
                           (expand-file-name "~/.doom.d/"))))
 
+;; Initialize euporie-termint immediately after loading
+(when (and (featurep 'euporie-termint)
+           (fboundp 'euporie-termint-setup) 
+           (fboundp 'euporie-termint-setup-keybinding))
+  (euporie-termint-setup)
+  (euporie-termint-setup-keybinding))
+
 ;; Setup euporie-termint integration
 (with-eval-after-load 'org
   (message "Setting up euporie-termint integration")
   (when (featurep 'euporie-termint)
     (message "euporie-termint functions available: %s"
              (mapcar (lambda (f) (if (fboundp f) f (format "MISSING-%s" f)))
-                     '(euporie-python-start euporie-r-start euporie-stata-start)))))
+                     '(euporie-python-start euporie-r-start euporie-stata-start)))
+    ;; Initialize euporie-termint after confirming it's loaded
+    (when (and (fboundp 'euporie-termint-setup) (fboundp 'euporie-termint-setup-keybinding))
+      (euporie-termint-setup)
+      (euporie-termint-setup-keybinding))))
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
