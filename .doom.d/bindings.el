@@ -88,6 +88,23 @@
        (t
         (message "R handler not available"))))
      
+     ;; SAS code execution
+     ((and detected-lang
+           (member (downcase detected-lang) '("sas" "jupyter-sas"))
+           (or in-org-src in-src-block))
+      (message "✓ Calling SAS execution handler")
+      (cond
+       ;; If we're in org-src edit buffer, use the org-src specific handler
+       ((and in-org-src (fboundp 'termint-org-src-send-line-or-paragraph-or-fun-or-region))
+        (termint-org-src-send-line-or-paragraph-or-fun-or-region))
+       ((fboundp 'euporie-termint-send-region-or-line)
+        (euporie-termint-send-region-or-line))
+       ((fboundp 'org-babel-execute-src-block)
+        (message "Using org-babel fallback for SAS")
+        (org-babel-execute-src-block))
+       (t
+        (message "SAS handler not available"))))
+     
      ;; Default behavior
      (t
       (message "✗ No jupyter context detected, using default newline behavior")
@@ -123,6 +140,7 @@
                             ((derived-mode-p 'python-mode 'python-ts-mode) "python")
                             ((derived-mode-p 'R-mode 'ess-r-mode) "R") 
                             ((derived-mode-p 'stata-mode) "stata")
+                            ((derived-mode-p 'sas-mode) "sas")
                             (t nil)))
            ;; Buffer name detection for org-src buffers
            (buffer-name-lang (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
@@ -138,7 +156,7 @@
       
       ;; Enhanced condition check
       (if (and detected-lang
-               (member (downcase detected-lang) '("python" "stata" "r"))
+               (member (downcase detected-lang) '("python" "stata" "r" "sas"))
                (or in-org-src in-src-block))
           (let ((euporie-termint--in-advice t))
             ;; Debug enabled for troubleshooting
@@ -167,7 +185,7 @@
            (detected-lang element-lang))
       
       (if (and detected-lang
-               (member (downcase detected-lang) '("python" "stata" "r"))
+               (member (downcase detected-lang) '("python" "stata" "r" "sas"))
                (or in-org-src in-src-block))
           (let ((euporie-termint--in-advice t))
             (message "✓ Org-mode C-RET intercepted for %s" detected-lang)
