@@ -93,27 +93,32 @@
            (member (downcase detected-lang) '("sas" "jupyter-sas"))
            (or in-org-src in-src-block))
       (message "✓ Calling SAS execution handler")
-      (cond
-       ;; Check if we need remote execution first
-       ((and in-org-src 
-             (boundp 'org-src--remote-dir)
-             org-src--remote-dir
-             (fboundp 'euporie-sas-start-remote))
-        (message "Using remote SAS execution")
-        (euporie-sas-start-remote org-src--remote-dir)
-        (when (fboundp 'termint-euporie-sas-send-region)
-          (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
-       ;; Local execution for org-src buffers
-       ((and in-org-src (fboundp 'euporie-sas-start))
-        (message "Using local SAS execution")
-        (euporie-sas-start)
-        (when (fboundp 'termint-euporie-sas-send-region)
-          (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
-       ;; Generic euporie handler
-       ((fboundp 'termint-euporie-sas-send-region)
-        (termint-euporie-sas-send-region (point-at-bol) (point-at-eol)))
-       (t
-        (message "SAS handler not available - functions missing"))))
+      (let* ((code (if (use-region-p)
+                      (buffer-substring-no-properties (region-beginning) (region-end))
+                    (thing-at-point 'line t)))
+             ;; Extract :dir from org-babel info if available
+             (babel-info (bound-and-true-p org-src--babel-info))
+             (dir (when babel-info (cdr (assoc :dir (nth 2 babel-info))))))
+        (message "SAS execution: dir=%s remote=%s" dir (when dir (file-remote-p dir)))
+        (cond
+         ;; Remote SAS execution via WRDS
+         ((and dir (file-remote-p dir) (fboundp 'euporie-sas-start-remote))
+          (message "✓ Using remote SAS execution via WRDS")
+          (euporie-sas-start-remote dir)
+          (when (fboundp 'termint-euporie-sas-send-region)
+            (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
+         ;; Local SAS execution
+         ((fboundp 'euporie-sas-start)
+          (message "✓ Using local SAS execution")
+          (euporie-sas-start)
+          (when (fboundp 'termint-euporie-sas-send-region)
+            (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
+         ;; Fallback to send only
+         ((fboundp 'termint-euporie-sas-send-region)
+          (message "✓ Using SAS send region fallback")
+          (termint-euporie-sas-send-region (point-at-bol) (point-at-eol)))
+         (t
+          (message "✗ SAS handler not available - functions missing")))))
      
      ;; Default behavior
      (t
