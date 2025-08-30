@@ -229,43 +229,49 @@ Otherwise start local SAS session."
     
     ;; Start the termint session
     (condition-case err
-        (termint-euporie-sas-start)
+        (progn 
+          (termint-euporie-sas-start)
+          ;; Display in split window
+          (when-let ((buffer (get-buffer "*euporie-sas*")))
+            (split-window-right)
+            (other-window 1)
+            (switch-to-buffer buffer)
+            (other-window -1)))
       (error 
        (euporie-termint-debug-log 'error "Failed to start local SAS termint: %s" err)
        (message "Warning: Failed to start local SAS euporie console: %s" err)))))
 
 (defun euporie-sas-start-remote (remote-dir)
-  "Start remote SAS euporie console using atomic termint command like tramp-wrds.el pattern."
+  "Start remote SAS euporie console by using working tramp-wrds-termint and then sending euporie command."
   (let* ((localname (if (file-remote-p remote-dir)
                         (file-remote-p remote-dir 'localname)
-                      remote-dir))
-         (buffer-name "*euporie-sas*")
-         ;; Create ONE atomic command that does: ssh + qrsh + cd + euporie (copying tramp-wrds pattern)
-         (full-command (format "ssh wrds && qrsh -q interactive.q && cd %s && export PATH=/home/nyu/eddyhu/env/bin:$PATH && euporie console --kernel-name=sas --graphics=sixel" 
-                              localname)))
+                      remote-dir)))
     
-    (euporie-termint-debug-log 'info "Remote SAS start with atomic command: %s" full-command)
+    (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds-termint + euporie command for: %s" remote-dir)
     
-    ;; Kill existing buffer if it exists
-    (when (get-buffer buffer-name)
-      (let ((kill-buffer-query-functions nil))
-        (kill-buffer buffer-name)))
-    
-    ;; Define termint session with the atomic command (copying tramp-wrds pattern exactly)
-    (termint-define "euporie-sas-remote" full-command
-                    :bracketed-paste-p t
-                    :backend 'eat
-                    :env '(("TERM" . "eat-truecolor")
-                           ("COLORTERM" . "truecolor")))
-    
-    ;; Start the session (copying tramp-wrds pattern)
-    (termint-euporie-sas-remote-start)
-    
-    ;; Rename buffer to match expected name
-    (when-let ((buffer (get-buffer "*euporie-sas-remote*")))
-      (with-current-buffer buffer
-        (rename-buffer "*euporie-sas*" t))
-      buffer)))
+    ;; Use the working tramp-wrds-termint to get to compute node
+    (let ((wrds-buffer (tramp-wrds-termint)))
+      
+      (when wrds-buffer
+        ;; Rename buffer to match euporie naming
+        (with-current-buffer wrds-buffer
+          (rename-buffer "*euporie-sas*" t))
+        
+        ;; Send euporie command to the compute node shell
+        (let ((euporie-cmd (format "cd %s && export PATH=/home/nyu/eddyhu/env/bin:$PATH && euporie console --kernel-name=sas --graphics=sixel" localname)))
+          (with-current-buffer "*euporie-sas*"
+            ;; Use the working send function for this buffer type
+            (comint-send-string (current-buffer) (concat euporie-cmd "\n"))
+            (euporie-termint-debug-log 'info "Sent euporie command to compute node: %s" euporie-cmd)))
+        
+        ;; Display in split window
+        (split-window-right)
+        (other-window 1)
+        (switch-to-buffer wrds-buffer)
+        (other-window -1)
+        
+        (euporie-termint-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
+        wrds-buffer))))
 
 
 ;;; Buffer Management
