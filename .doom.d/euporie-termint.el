@@ -235,48 +235,37 @@ Otherwise start local SAS session."
        (message "Warning: Failed to start local SAS euporie console: %s" err)))))
 
 (defun euporie-sas-start-remote (remote-dir)
-  "Start remote SAS euporie console using existing tramp-wrds.el infrastructure with synchronous startup."
+  "Start remote SAS euporie console using atomic termint command like tramp-wrds.el pattern."
   (let* ((localname (if (file-remote-p remote-dir)
                         (file-remote-p remote-dir 'localname)
-                      remote-dir)))
+                      remote-dir))
+         (buffer-name "*euporie-sas*")
+         ;; Create ONE atomic command that does: ssh + qrsh + cd + euporie (copying tramp-wrds pattern)
+         (full-command (format "ssh wrds && qrsh -q interactive.q && cd %s && export PATH=/home/nyu/eddyhu/env/bin:$PATH && euporie console --kernel-name=sas --graphics=sixel" 
+                              localname)))
     
-    (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds.el for: %s" remote-dir)
+    (euporie-termint-debug-log 'info "Remote SAS start with atomic command: %s" full-command)
     
-    ;; Use the working tramp-wrds infrastructure
-    (let ((wrds-buffer (tramp-wrds-termint)))
-      
-      ;; Rename the buffer to match euporie naming convention
-      (when wrds-buffer
-        (with-current-buffer wrds-buffer
-          (rename-buffer "*euporie-sas*" t))
-        
-        ;; Wait for qrsh allocation with verification (synchronous approach)
-        (euporie-termint-debug-log 'info "Waiting for WRDS qrsh allocation...")
-        (sleep-for 45)  ; Wait longer for qrsh allocation
-        
-        ;; Verify we're on compute node by checking hostname
-        (with-current-buffer "*euporie-sas*"
-          (termint-wrds-qrsh-send-string "hostname")
-          (sleep-for 2))  ; Wait for hostname response
-        
-        ;; Start euporie console synchronously
-        (let ((euporie-cmd (format "export PATH=/home/nyu/eddyhu/env/bin:$PATH && cd %s && euporie console --kernel-name=sas --graphics=sixel" localname)))
-          (with-current-buffer "*euporie-sas*"
-            (termint-wrds-qrsh-send-string euporie-cmd)
-            (euporie-termint-debug-log 'info "Started euporie console: %s" euporie-cmd))
-          
-          ;; Wait for euporie console to be ready (synchronous)
-          (euporie-termint-debug-log 'info "Waiting for euporie console readiness...")
-          (sleep-for 15)  ; Wait longer for euporie console to start and kernel to initialize
-          
-          ;; Send a simple test to verify SAS kernel is ready
-          (with-current-buffer "*euporie-sas*"
-            (termint-wrds-qrsh-send-string "%put SAS kernel ready;")
-            (sleep-for 3))  ; Wait for SAS response
-          (euporie-termint-debug-log 'info "Remote SAS euporie console ready"))
-        
-        (euporie-termint-debug-log 'info "Using tramp-wrds buffer for SAS: %s" (buffer-name wrds-buffer))
-        wrds-buffer))))
+    ;; Kill existing buffer if it exists
+    (when (get-buffer buffer-name)
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buffer-name)))
+    
+    ;; Define termint session with the atomic command (copying tramp-wrds pattern exactly)
+    (termint-define "euporie-sas-remote" full-command
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "eat-truecolor")
+                           ("COLORTERM" . "truecolor")))
+    
+    ;; Start the session (copying tramp-wrds pattern)
+    (termint-euporie-sas-remote-start)
+    
+    ;; Rename buffer to match expected name
+    (when-let ((buffer (get-buffer "*euporie-sas-remote*")))
+      (with-current-buffer buffer
+        (rename-buffer "*euporie-sas*" t))
+      buffer)))
 
 
 ;;; Buffer Management
