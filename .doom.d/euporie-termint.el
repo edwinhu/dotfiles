@@ -67,10 +67,16 @@ Some protocols may work better with stata_kernel than others."
                                euporie-termint-stata-graphics-protocol
                              euporie-termint-graphics-protocol))
          (base-cmd (format "pixi run euporie-console --graphics=%s --kernel-name=%s" 
-                          graphics-protocol kernel)))
-    (if (euporie-termint--check-direnv-allowed project-dir)
-        (format "sh -c 'cd %s && direnv exec . %s'" project-dir base-cmd)
-      (format "sh -c 'cd %s && %s'" project-dir base-cmd))))
+                          graphics-protocol kernel))
+         (is-remote (file-remote-p project-dir)))
+    
+    (if is-remote
+        ;; For remote execution, don't wrap with shell cd - TRAMP handles directory context
+        base-cmd
+      ;; For local execution, use existing logic
+      (if (euporie-termint--check-direnv-allowed project-dir)
+          (format "sh -c 'cd %s && direnv exec . %s'" project-dir base-cmd)
+        (format "sh -c 'cd %s && %s'" project-dir base-cmd)))))
 
 ;;; Kernel Management Functions
 
@@ -181,15 +187,110 @@ Some protocols may work better with stata_kernel than others."
       (sleep-for 2)  ; Simple 2-second wait instead of complex detection
       (euporie-termint-debug-log 'info "Kernel initialization wait complete"))))
 
+(defun euporie-sas-start (&optional dir)
+  "Start SAS euporie console with direnv handling.
+If DIR is provided and is a TRAMP path, start remote SAS session.
+Otherwise start local SAS session."
+  (interactive)
+  (let* ((is-remote (and dir (file-remote-p dir)))
+         (buffer-name "*euporie-sas*"))
+    
+    (euporie-termint-debug-log 'info "Starting %s SAS euporie console in directory: %s" 
+                               (if is-remote "remote" "local") (or dir default-directory))
+    
+    ;; Kill any existing buffer first
+    (when (get-buffer buffer-name)
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buffer-name)))
+    
+    (if is-remote
+        (euporie-sas-start-remote dir)
+      (euporie-sas-start-local))
+    
+    ;; Return buffer for further use
+    (let ((final-buffer (get-buffer buffer-name)))
+      (euporie-termint-debug-log 'info "SAS startup complete - buffer: %s" 
+                                 (if final-buffer (buffer-name final-buffer) "nil"))
+      final-buffer)))
+
+(defun euporie-sas-start-local ()
+  "Start local SAS euporie console using termint."
+  (let ((smart-cmd (euporie-termint--build-euporie-command "sas" euporie-termint-project-dir)))
+    
+    (euporie-termint-debug-log 'info "Local SAS command: %s" smart-cmd)
+    
+    ;; Define termint for local execution
+    (termint-define "euporie-sas" smart-cmd
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "eat-truecolor") 
+                           ("COLORTERM" . "truecolor")
+                           ("EUPORIE_GRAPHICS" . "sixel")))
+    
+    ;; Start the termint session
+    (condition-case err
+        (termint-euporie-sas-start)
+      (error 
+       (euporie-termint-debug-log 'error "Failed to start local SAS termint: %s" err)
+       (message "Warning: Failed to start local SAS euporie console: %s" err)))))
+
+(defun euporie-sas-start-remote (remote-dir)
+  "Start remote SAS euporie console using existing tramp-wrds.el infrastructure with synchronous startup."
+  (let* ((localname (if (file-remote-p remote-dir)
+                        (file-remote-p remote-dir 'localname)
+                      remote-dir)))
+    
+    (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds.el for: %s" remote-dir)
+    
+    ;; Use the working tramp-wrds infrastructure
+    (let ((wrds-buffer (tramp-wrds-termint)))
+      
+      ;; Rename the buffer to match euporie naming convention
+      (when wrds-buffer
+        (with-current-buffer wrds-buffer
+          (rename-buffer "*euporie-sas*" t))
+        
+        ;; Wait for qrsh allocation with verification (synchronous approach)
+        (euporie-termint-debug-log 'info "Waiting for WRDS qrsh allocation...")
+        (sleep-for 45)  ; Wait longer for qrsh allocation
+        
+        ;; Verify we're on compute node by checking hostname
+        (with-current-buffer "*euporie-sas*"
+          (termint-wrds-qrsh-send-string "hostname")
+          (sleep-for 2))  ; Wait for hostname response
+        
+        ;; Start euporie console synchronously
+        (let ((euporie-cmd (format "export PATH=/home/nyu/eddyhu/env/bin:$PATH && cd %s && euporie console --kernel-name=sas --graphics=sixel" localname)))
+          (with-current-buffer "*euporie-sas*"
+            (termint-wrds-qrsh-send-string euporie-cmd)
+            (euporie-termint-debug-log 'info "Started euporie console: %s" euporie-cmd))
+          
+          ;; Wait for euporie console to be ready (synchronous)
+          (euporie-termint-debug-log 'info "Waiting for euporie console readiness...")
+          (sleep-for 15)  ; Wait longer for euporie console to start and kernel to initialize
+          
+          ;; Send a simple test to verify SAS kernel is ready
+          (with-current-buffer "*euporie-sas*"
+            (termint-wrds-qrsh-send-string "%put SAS kernel ready;")
+            (sleep-for 3))  ; Wait for SAS response
+          (euporie-termint-debug-log 'info "Remote SAS euporie console ready"))
+        
+        (euporie-termint-debug-log 'info "Using tramp-wrds buffer for SAS: %s" (buffer-name wrds-buffer))
+        wrds-buffer))))
+
+
 ;;; Buffer Management
 
-(defun euporie-termint-get-or-create-buffer (kernel)
-  "Get or create euporie termint buffer for KERNEL."
-  (let* ((buffer-name (format "*euporie-%s*" kernel))
+(defun euporie-termint-get-or-create-buffer (kernel &optional dir)
+  "Get or create euporie termint buffer for KERNEL.
+DIR parameter is used for SAS to determine local vs remote execution."
+  (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
+         (buffer-name (format "*euporie-%s*" kernel))
          (start-func (cond
                      ((string= kernel "python") #'euporie-python-start)
                      ((string= kernel "r") #'euporie-r-start)
                      ((string= kernel "stata") #'euporie-stata-start)
+                     ((string= kernel "sas") (lambda () (euporie-sas-start dir)))
                      (t (error "Unsupported kernel: %s" kernel))))
          (buffer (get-buffer buffer-name)))
     
@@ -202,19 +303,27 @@ Some protocols may work better with stata_kernel than others."
       ;; Need to start new console
       (progn
         (funcall start-func)
-        ;; Wait for buffer creation and kernel readiness  
-        (let ((max-wait-buffer 20) (max-wait-kernel 8) (wait-count 0) (buffer nil))
-          ;; First, wait for buffer creation (up to 10 seconds)
-          (while (and (< wait-count max-wait-buffer)
-                     (not (setq buffer (get-buffer buffer-name))))
-            (sleep-for 0.5)
-            (setq wait-count (1+ wait-count)))
-          
-          ;; Then wait a short time for kernel to initialize (simplified approach)
-          (when buffer
-            (sleep-for 2)  ; Simple 2-second wait instead of complex detection
-            (euporie-termint-debug-log 'info "Kernel initialization wait complete")))
-        (get-buffer buffer-name)))))
+        ;; For remote SAS, use special synchronous handling
+        (if is-remote-sas
+            (progn
+              (euporie-termint-debug-log 'info "Remote SAS detected - using synchronous startup")
+              ;; The remote function handles all timing internally
+              (get-buffer buffer-name))
+          ;; For local/non-SAS, use standard async pattern
+          (progn
+            ;; Wait for buffer creation and kernel readiness  
+            (let ((max-wait-buffer 20) (max-wait-kernel 8) (wait-count 0) (buffer nil))
+              ;; First, wait for buffer creation (up to 10 seconds)
+              (while (and (< wait-count max-wait-buffer)
+                         (not (setq buffer (get-buffer buffer-name))))
+                (sleep-for 0.5)
+                (setq wait-count (1+ wait-count)))
+              
+              ;; Then wait a short time for kernel to initialize (simplified approach)
+              (when buffer
+                (sleep-for 2)  ; Simple 2-second wait instead of complex detection
+                (euporie-termint-debug-log 'info "Kernel initialization wait complete")))
+            (get-buffer buffer-name))))))
 
 ;;; Language Detection
 
@@ -238,6 +347,9 @@ Some protocols may work better with stata_kernel than others."
        ((or (and detected-lang (string-equal detected-lang "stata")) 
             (eq major-mode 'stata-mode)) 
         "stata")
+       ((or (and detected-lang (or (string-equal detected-lang "sas") (string-equal detected-lang "SAS"))) 
+            (eq major-mode 'SAS-mode)) 
+        "sas")
        (t "python")))))
 
 ;;; Console Display Management
@@ -352,13 +464,18 @@ Some protocols may work better with stata_kernel than others."
 
 ;;; Code Execution
 
-(defun euporie-termint-send-code (kernel code)
-  "Send CODE to euporie console for KERNEL."
-  (let* ((buffer (euporie-termint-get-or-create-buffer kernel))
+(defun euporie-termint-send-code (kernel code &optional dir)
+  "Send CODE to euporie console for KERNEL.
+DIR parameter is used for SAS to determine local vs remote execution."
+  (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
+         (buffer (euporie-termint-get-or-create-buffer kernel dir))
          (send-func (cond
                     ((string= kernel "python") #'termint-euporie-python-send-string)
                     ((string= kernel "r") #'termint-euporie-r-send-string)
                     ((string= kernel "stata") #'termint-euporie-stata-send-string)
+                    ((and (string= kernel "sas") is-remote-sas) 
+                     #'termint-wrds-qrsh-send-string)  ; Use WRDS-specific send function
+                    ((string= kernel "sas") #'termint-euporie-sas-send-string)
                     (t (error "Unsupported kernel: %s" kernel)))))
     
     (when buffer
@@ -367,8 +484,13 @@ Some protocols may work better with stata_kernel than others."
       ;; Display console in right window
       (euporie-termint-display-console-right buffer)
       
-      ;; Send code to console
-      (funcall send-func code)
+      ;; Send code to console with proper targeting
+      (if is-remote-sas
+          ;; For remote SAS, send directly to the *euporie-sas* buffer
+          (with-current-buffer buffer
+            (funcall send-func code))
+        ;; For other kernels, use standard approach
+        (funcall send-func code))
       
       ;; Start file monitoring for Stata graphics if not already running
       (when (string= kernel "stata")
@@ -387,6 +509,10 @@ Some protocols may work better with stata_kernel than others."
   (interactive)
   
   (let* ((kernel (euporie-termint-detect-kernel))
+         ;; Detect TRAMP path for remote execution (SAS-specific for now)
+         (current-dir (or (and (string= kernel "sas") 
+                              (file-remote-p default-directory))
+                         default-directory))
          (code (cond
                 ((use-region-p)
                  (buffer-substring-no-properties (region-beginning) (region-end)))
@@ -400,8 +526,10 @@ Some protocols may work better with stata_kernel than others."
                  (thing-at-point 'line t)))))
     
     (when code
-      (euporie-termint-debug-log 'info "Executing %s code via euporie" kernel)
-      (euporie-termint-send-code kernel code))))
+      (euporie-termint-debug-log 'info "Executing %s code via euporie in dir: %s" kernel current-dir)
+      (if (and (string= kernel "sas") (file-remote-p current-dir))
+          (euporie-termint-send-code kernel code current-dir)
+        (euporie-termint-send-code kernel code)))))
 
 ;;; Org-babel Integration (Optional)
 
@@ -428,6 +556,15 @@ Some protocols may work better with stata_kernel than others."
       (euporie-termint-send-code "stata" body)
       ;; For org-babel, we don't return output as euporie handles display
       "")))
+
+(defun org-babel-execute:sas (body params)
+  "Execute SAS BODY with PARAMS using euporie.
+Supports remote execution via :dir parameter."
+  (let ((dir (cdr (assoc :dir params))))
+    (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
+    (euporie-termint-send-code "sas" body dir)
+    ;; For org-babel, we don't return output as euporie handles display
+    ""))
 
 ;;; Buffer keybinding setup helper function
 
@@ -458,7 +595,8 @@ Some protocols may work better with stata_kernel than others."
   (add-hook 'python-mode-hook #'euporie-termint-setup-buffer-keybinding)
   (add-hook 'ess-r-mode-hook #'euporie-termint-setup-buffer-keybinding)
   (add-hook 'stata-mode-hook #'euporie-termint-setup-buffer-keybinding)
-  (add-hook 'ess-stata-mode-hook #'euporie-termint-setup-buffer-keybinding))
+  (add-hook 'ess-stata-mode-hook #'euporie-termint-setup-buffer-keybinding)
+  (add-hook 'SAS-mode-hook #'euporie-termint-setup-buffer-keybinding))
 
 ;;; Initialize termint definitions
 
@@ -480,7 +618,7 @@ Some protocols may work better with stata_kernel than others."
           (euporie-termint-debug-log 'info "Euporie setup completed with path: %s" euporie-path))
       (progn
         (message "euporie-termint: WARNING - No euporie-console executable found")
-        (euporie-termint-debug-log 'warn "No euporie-console executable found in PATH or project directory")))))
+        (euporie-termint-debug-log 'warn "No euporie-console executable found in PATH or project directory"))))))
 
 ;;; Initialization
 
