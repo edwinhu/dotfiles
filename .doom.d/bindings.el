@@ -94,16 +94,26 @@
            (or in-org-src in-src-block))
       (message "✓ Calling SAS execution handler")
       (cond
-       ;; If we're in org-src edit buffer, use the org-src specific handler
-       ((and in-org-src (fboundp 'termint-org-src-send-line-or-paragraph-or-fun-or-region))
-        (termint-org-src-send-line-or-paragraph-or-fun-or-region))
-       ((fboundp 'euporie-termint-send-region-or-line)
-        (euporie-termint-send-region-or-line))
-       ((fboundp 'org-babel-execute-src-block)
-        (message "Using org-babel fallback for SAS")
-        (org-babel-execute-src-block))
+       ;; Check if we need remote execution first
+       ((and in-org-src 
+             (boundp 'org-src--remote-dir)
+             org-src--remote-dir
+             (fboundp 'euporie-sas-start-remote))
+        (message "Using remote SAS execution")
+        (euporie-sas-start-remote org-src--remote-dir)
+        (when (fboundp 'termint-euporie-sas-send-region)
+          (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
+       ;; Local execution for org-src buffers
+       ((and in-org-src (fboundp 'euporie-sas-start))
+        (message "Using local SAS execution")
+        (euporie-sas-start)
+        (when (fboundp 'termint-euporie-sas-send-region)
+          (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
+       ;; Generic euporie handler
+       ((fboundp 'termint-euporie-sas-send-region)
+        (termint-euporie-sas-send-region (point-at-bol) (point-at-eol)))
        (t
-        (message "SAS handler not available"))))
+        (message "SAS handler not available - functions missing"))))
      
      ;; Default behavior
      (t
