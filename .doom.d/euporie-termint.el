@@ -281,8 +281,8 @@ Otherwise start local SAS session."
       
       (when wrds-buffer
         
-        ;; Send euporie command to the compute node shell
-        (let ((euporie-cmd (format "cd %s && export PATH=/home/nyu/eddyhu/env/bin:$PATH && euporie console --kernel-name=sas --graphics=sixel" localname)))
+        ;; Send euporie command to the compute node shell with suppressed output
+        (let ((euporie-cmd (format "cd %s 2>/dev/null && export PATH=/home/nyu/eddyhu/env/bin:$PATH >/dev/null 2>&1 && clear && exec euporie console --kernel-name=sas --graphics=sixel" localname)))
           (sas-workflow-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
           (with-current-buffer wrds-buffer
             ;; Use termint send function (not comint)

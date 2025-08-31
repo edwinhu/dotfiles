@@ -103,7 +103,7 @@ QUEUE can be 'highmem', 'now', or nil for default interactive queue."
                         ((equal queue "highmem") "qrsh -q highmem.q")
                         ((equal queue "now") "qrsh -now yes -q interactive.q")
                         (t "qrsh -q interactive.q")))
-         (full-command (format "ssh -t wrds %s" qrsh-command)))
+         (full-command (format "ssh -t -q wrds %s" qrsh-command)))
     
     ;; Kill existing buffer if it exists
     (when (get-buffer buffer-name)
