@@ -85,6 +85,61 @@
 
 ;;; Interactive Session Functions
 
+(require 'termint nil t)
+
+(defun tramp-wrds-termint (&optional queue)
+  "Open a termint+eat session on WRDS compute node via qrsh.
+QUEUE can be 'highmem', 'now', or nil for default interactive queue."
+  (interactive)
+  (unless (fboundp 'termint-define)
+    (error "termint is not available. Install termint or use tramp-wrds-shell instead"))
+  (let* ((method (cond
+                  ((equal queue "highmem") "qrshmem")
+                  ((equal queue "now") "qrshnow")
+                  (t "qrsh")))
+         (session-name (format "wrds-%s" method))
+         (buffer-name (format "*WRDS %s*" method))
+         (qrsh-command (cond
+                        ((equal queue "highmem") "qrsh -q highmem.q")
+                        ((equal queue "now") "qrsh -now yes -q interactive.q")
+                        (t "qrsh -q interactive.q")))
+         (full-command (format "ssh -t wrds %s" qrsh-command)))
+    
+    ;; Kill existing buffer if it exists
+    (when (get-buffer buffer-name)
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buffer-name)))
+    
+    ;; Define termint session with eat backend - use literal session name
+    (cond
+     ((equal method "qrsh")
+      (termint-define "wrds-qrsh" full-command
+                      :bracketed-paste-p t
+                      :backend 'eat
+                      :env '(("TERM" . "eat-truecolor")
+                             ("COLORTERM" . "truecolor"))))
+     ((equal method "qrshmem")
+      (termint-define "wrds-qrshmem" full-command
+                      :bracketed-paste-p t
+                      :backend 'eat
+                      :env '(("TERM" . "eat-truecolor")
+                             ("COLORTERM" . "truecolor"))))
+     ((equal method "qrshnow")
+      (termint-define "wrds-qrshnow" full-command
+                      :bracketed-paste-p t
+                      :backend 'eat
+                      :env '(("TERM" . "eat-truecolor")
+                             ("COLORTERM" . "truecolor")))))
+    
+    ;; Start the appropriate session
+    (cond
+     ((equal method "qrsh") (termint-wrds-qrsh-start))
+     ((equal method "qrshmem") (termint-wrds-qrshmem-start))
+     ((equal method "qrshnow") (termint-wrds-qrshnow-start)))
+    
+    ;; Return the buffer
+    (get-buffer (format "*%s*" session-name))))
+
 (defun tramp-wrds-simple (&optional queue)
   "Open a simple shell that connects to WRDS via ssh + qrsh.
 This is the most reliable method that works regardless of terminal backend."
@@ -196,21 +251,18 @@ QUEUE can be 'highmem', 'now', or nil for default interactive queue."
 (defun tramp-wrds (&optional queue terminal-type)
   "Open an interactive session on WRDS compute node.
 QUEUE can be 'highmem', 'now', or nil for default interactive queue.
-TERMINAL-TYPE can be 'vterm', 'eat', or 'shell' (default based on +term-backend)."
+TERMINAL-TYPE can be 'termint+eat' (default), 'vterm', 'eat', or 'shell'."
   (interactive 
    (list 
     (when current-prefix-arg
       (completing-read "Queue: " '("interactive" "highmem" "now") nil t))
     (when (> (prefix-numeric-value current-prefix-arg) 4)
-      (completing-read "Terminal: " '("vterm" "eat" "shell") nil t))))
+      (completing-read "Terminal: " '("termint+eat" "vterm" "eat" "shell") nil t))))
   
-  (let ((term-type (or terminal-type
-                      (cond
-                       ((and (eq +term-backend 'vterm) (fboundp 'vterm)) "vterm")
-                       ((and (eq +term-backend 'eat) (fboundp 'eat)) "eat")
-                       (t "shell")))))
+  (let ((term-type (or terminal-type "termint+eat")))
     (condition-case err
         (cond
+         ((string= term-type "termint+eat") (tramp-wrds-termint queue))
          ((string= term-type "vterm") (tramp-wrds-vterm queue))
          ((string= term-type "eat") (tramp-wrds-eat queue))
          (t (tramp-wrds-shell queue)))

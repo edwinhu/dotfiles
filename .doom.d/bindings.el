@@ -1,5 +1,24 @@
 ;;; bindings.el -*- lexical-binding: t; -*-
 
+;;; SAS Workflow Logging Infrastructure
+(defvar sas-workflow-debug-log-file (expand-file-name "sas-workflow-debug.log" "~/")
+  "Log file for SAS workflow debugging information.")
+
+(defun sas-workflow-debug-log (level format-string &rest args)
+  "Log LEVEL message with FORMAT-STRING and ARGS to SAS workflow debug file."
+  (let ((message (apply #'format format-string args))
+        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+    (with-temp-buffer
+      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+      (append-to-file (point-min) (point-max) sas-workflow-debug-log-file))))
+
+(defun sas-workflow-clear-log ()
+  "Clear the SAS workflow debug log file."
+  (interactive)
+  (when (file-exists-p sas-workflow-debug-log-file)
+    (delete-file sas-workflow-debug-log-file))
+  (sas-workflow-debug-log 'info "=== SAS Workflow Log Started ==="))
+
 (map! :map global-map "M-Q" #'unfill-paragraph)
 
 ;; SAS console keybindings
@@ -19,15 +38,49 @@
 ;; CRITICAL: C-RET override for Jupyter integration
 ;; This uses emulation-mode-map-alists for HIGHEST priority
 
-(defun smart-org-src-send ()
-  "Smart dispatcher for org-src C-RET based on detected language."
-  (interactive)
-  (message "=== smart-org-src-send called ===")
-  
-  ;; Enhanced context detection
+;; Helper functions for SAS workflow (defined here to avoid loading issues)
+(defun smart-org-src-get-language ()
+  "Get the detected language from current context."
   (let* ((in-org (derived-mode-p 'org-mode))
          (in-org-src (and (boundp 'org-src--beg-marker) org-src--beg-marker))
          (in-src-block (and in-org (org-in-src-block-p)))
+         ;; Language detection from multiple sources
+         (element-lang (when (and in-org in-src-block)
+                        (let ((element (org-element-at-point)))
+                          (when (eq (org-element-type element) 'src-block)
+                            (org-element-property :language element)))))
+         (buffer-lang (when in-org-src
+                       (let ((buffer-name (buffer-name)))
+                         (when (string-match "\\*Org Src .*\\[\\([^]]+\\)\\]\\*" buffer-name)
+                           (match-string 1 buffer-name)))))
+         (var-lang (and (boundp 'org-src-lang-mode) 
+                       (symbol-name org-src-lang-mode)
+                       (replace-regexp-in-string "-mode$" "" (symbol-name org-src-lang-mode))))
+         (final-lang (or element-lang buffer-lang var-lang "unknown")))
+    final-lang))
+
+(defun smart-org-src-parse-remote-dir ()
+  "Parse remote directory from org-babel-info."
+  (let* ((babel-info (bound-and-true-p org-src--babel-info))
+         (dir (when babel-info (cdr (assoc :dir (nth 2 babel-info))))))
+    dir))
+
+(defun smart-org-src-send ()
+  "Smart dispatcher for org-src C-RET based on detected language."
+  (interactive)
+  (sas-workflow-debug-log 'info "=== C-RET pressed in smart-org-src-send ===")
+  (message "=== smart-org-src-send called ===")
+  
+  ;; Enhanced context detection with safe marker handling
+  (let* ((in-org (derived-mode-p 'org-mode))
+         (in-org-src (and (boundp 'org-src--beg-marker) 
+                         org-src--beg-marker
+                         (condition-case nil
+                             (marker-buffer org-src--beg-marker)
+                           (error nil))))
+         (in-src-block (and in-org (condition-case nil
+                                       (org-in-src-block-p)
+                                     (error nil))))
          (element (when in-org (org-element-at-point)))
          (element-lang (when element (org-element-property :language element)))
          ;; Buffer name detection for org-src buffers
@@ -37,6 +90,11 @@
          (var-lang (bound-and-true-p org-src--lang))
          ;; Final language determination
          (detected-lang (or element-lang var-lang buffer-name-lang)))
+    
+    (sas-workflow-debug-log 'debug "Language detection - buffer: %s, in-org: %s, in-org-src: %s, in-src-block: %s"
+                            (buffer-name) in-org in-org-src in-src-block)
+    (sas-workflow-debug-log 'debug "Language detection - element-lang: %s, buffer-lang: %s, var-lang: %s, final: %s"
+                            element-lang buffer-name-lang var-lang detected-lang)
     
     (message "Context: org=%s org-src=%s in-block=%s element-lang=%s buffer-lang=%s var-lang=%s final-lang=%s"
              in-org in-org-src in-src-block element-lang buffer-name-lang var-lang detected-lang)
@@ -92,32 +150,63 @@
      ((and detected-lang
            (member (downcase detected-lang) '("sas" "jupyter-sas"))
            (or in-org-src in-src-block))
+      (sas-workflow-debug-log 'info "✓ SAS code execution detected")
       (message "✓ Calling SAS execution handler")
       (let* ((code (if (use-region-p)
                       (buffer-substring-no-properties (region-beginning) (region-end))
                     (thing-at-point 'line t)))
-             ;; Extract :dir from org-babel info if available
-             (babel-info (bound-and-true-p org-src--babel-info))
-             (dir (when babel-info (cdr (assoc :dir (nth 2 babel-info))))))
+             ;; Safe extraction of :dir - check different contexts
+             (babel-info (cond
+                         ;; org-src editing buffer context  
+                         ((and in-org-src (boundp 'org-src--babel-info)) org-src--babel-info)
+                         ;; org-mode src block context
+                         ((and in-src-block element) 
+                          (let ((params (org-element-property :parameters element)))
+                            (when params
+                              (list nil nil (org-babel-parse-header-arguments params)))))
+                         (t nil)))
+             (dir (when babel-info 
+                   (condition-case err
+                       (cdr (assoc :dir (nth 2 babel-info)))
+                     (error 
+                      (sas-workflow-debug-log 'error "Error accessing babel-info dir: %s" err)
+                      nil)))))
+        
+        (sas-workflow-debug-log 'debug "SAS execution context - code: %s" 
+                                (if code (substring code 0 (min 50 (length code))) "nil"))
+        (sas-workflow-debug-log 'debug "SAS execution context - babel-info: %s, dir: %s" babel-info dir)
+        (sas-workflow-debug-log 'info "SAS execution: dir=%s remote=%s" dir (when dir (file-remote-p dir)))
         (message "SAS execution: dir=%s remote=%s" dir (when dir (file-remote-p dir)))
         (cond
-         ;; Remote SAS execution via WRDS
-         ((and dir (file-remote-p dir) (fboundp 'euporie-sas-start-remote))
+         ;; Remote SAS execution via WRDS - detect both TRAMP paths and WRDS filesystem paths
+         ((and dir 
+               (or (file-remote-p dir)  ; Standard TRAMP paths like /ssh:host:path
+                   (string-match "^/wrds/" dir))  ; WRDS filesystem paths like /wrds/home/user/
+               (fboundp 'euporie-sas-start-remote))
+          (sas-workflow-debug-log 'info "✓ Using remote SAS execution via WRDS")
           (message "✓ Using remote SAS execution via WRDS")
+          (sas-workflow-debug-log 'debug "Calling euporie-sas-start-remote with dir: %s" dir)
           (euporie-sas-start-remote dir)
           (when (fboundp 'termint-euporie-sas-send-region)
+            (sas-workflow-debug-log 'debug "Sending SAS region via termint-euporie-sas-send-region")
             (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
          ;; Local SAS execution
          ((fboundp 'euporie-sas-start)
+          (sas-workflow-debug-log 'info "✓ Using local SAS execution")
           (message "✓ Using local SAS execution")
+          (sas-workflow-debug-log 'debug "Calling euporie-sas-start")
           (euporie-sas-start)
           (when (fboundp 'termint-euporie-sas-send-region)
+            (sas-workflow-debug-log 'debug "Sending SAS region via termint-euporie-sas-send-region")
             (termint-euporie-sas-send-region (point-at-bol) (point-at-eol))))
          ;; Fallback to send only
          ((fboundp 'termint-euporie-sas-send-region)
+          (sas-workflow-debug-log 'info "✓ Using SAS send region fallback")
           (message "✓ Using SAS send region fallback")
+          (sas-workflow-debug-log 'debug "Calling termint-euporie-sas-send-region fallback")
           (termint-euporie-sas-send-region (point-at-bol) (point-at-eol)))
          (t
+          (sas-workflow-debug-log 'error "✗ SAS handler not available - functions missing")
           (message "✗ SAS handler not available - functions missing")))))
      
      ;; Default behavior

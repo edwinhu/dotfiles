@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'termint nil t)
+(require 'tramp-wrds nil t)
 (require 'org)
 (require 'ob)
 
@@ -40,6 +41,16 @@ Some protocols may work better with stata_kernel than others."
 
 (defvar euporie-termint-debug-log-file (expand-file-name "euporie-debug.log" "~/")
   "Log file for euporie debugging information.")
+(defvar sas-workflow-debug-log-file (expand-file-name "sas-workflow-debug.log" "~/")
+  "Log file for SAS workflow debugging information.")
+
+(defun sas-workflow-debug-log (level format-string &rest args)
+  "Log LEVEL message with FORMAT-STRING and ARGS to SAS workflow debug file."
+  (let ((message (apply #'format format-string args))
+        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+    (with-temp-buffer
+      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+      (append-to-file (point-min) (point-max) sas-workflow-debug-log-file))))
 
 (defun euporie-termint-debug-log (level format-string &rest args)
   "Log LEVEL message with FORMAT-STRING and ARGS to debug file."
@@ -195,20 +206,29 @@ Otherwise start local SAS session."
   (let* ((is-remote (and dir (file-remote-p dir)))
          (buffer-name "*euporie-sas*"))
     
+    (sas-workflow-debug-log 'info "=== euporie-sas-start called with dir: %s ===" (or dir "nil"))
+    (sas-workflow-debug-log 'debug "SAS start - is-remote: %s, buffer-name: %s" is-remote buffer-name)
     (euporie-termint-debug-log 'info "Starting %s SAS euporie console in directory: %s" 
                                (if is-remote "remote" "local") (or dir default-directory))
     
     ;; Kill any existing buffer first
     (when (get-buffer buffer-name)
+      (sas-workflow-debug-log 'info "Killing existing buffer: %s" buffer-name)
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
     
     (if is-remote
-        (euporie-sas-start-remote dir)
-      (euporie-sas-start-local))
+        (progn
+          (sas-workflow-debug-log 'info "Calling euporie-sas-start-remote with dir: %s" dir)
+          (euporie-sas-start-remote dir))
+      (progn
+        (sas-workflow-debug-log 'info "Calling euporie-sas-start-local")
+        (euporie-sas-start-local)))
     
     ;; Return buffer for further use
     (let ((final-buffer (get-buffer buffer-name)))
+      (sas-workflow-debug-log 'info "SAS startup complete - buffer: %s" 
+                             (if final-buffer (buffer-name final-buffer) "nil"))
       (euporie-termint-debug-log 'info "SAS startup complete - buffer: %s" 
                                  (if final-buffer (buffer-name final-buffer) "nil"))
       final-buffer)))
@@ -231,12 +251,9 @@ Otherwise start local SAS session."
     (condition-case err
         (progn 
           (termint-euporie-sas-start)
-          ;; Display in split window
+          ;; Display in split window using proper console display function
           (when-let ((buffer (get-buffer "*euporie-sas*")))
-            (split-window-right)
-            (other-window 1)
-            (switch-to-buffer buffer)
-            (other-window -1)))
+            (euporie-termint-display-console-right buffer)))
       (error 
        (euporie-termint-debug-log 'error "Failed to start local SAS termint: %s" err)
        (message "Warning: Failed to start local SAS euporie console: %s" err)))))
@@ -247,29 +264,40 @@ Otherwise start local SAS session."
                         (file-remote-p remote-dir 'localname)
                       remote-dir)))
     
+    (sas-workflow-debug-log 'info "=== euporie-sas-start-remote called with dir: %s ===" remote-dir)
+    (sas-workflow-debug-log 'debug "Remote SAS start - localname extracted: %s" localname)
     (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds-termint + euporie command for: %s" remote-dir)
     
     ;; Use the working tramp-wrds-termint to get to compute node
+    (sas-workflow-debug-log 'info "Calling tramp-wrds-termint to establish remote connection")
     (let ((wrds-buffer (tramp-wrds-termint)))
       
+      (if wrds-buffer
+          (progn
+            (sas-workflow-debug-log 'info "tramp-wrds-termint returned buffer: %s" (buffer-name wrds-buffer))
+            ;; Keep original buffer name - termint expects this for send functions
+            (sas-workflow-debug-log 'debug "Using original buffer name: %s" (buffer-name wrds-buffer)))
+        (sas-workflow-debug-log 'error "tramp-wrds-termint returned nil - no remote connection established"))
+      
       (when wrds-buffer
-        ;; Rename buffer to match euporie naming
-        (with-current-buffer wrds-buffer
-          (rename-buffer "*euporie-sas*" t))
         
         ;; Send euporie command to the compute node shell
         (let ((euporie-cmd (format "cd %s && export PATH=/home/nyu/eddyhu/env/bin:$PATH && euporie console --kernel-name=sas --graphics=sixel" localname)))
-          (with-current-buffer "*euporie-sas*"
-            ;; Use the working send function for this buffer type
-            (comint-send-string (current-buffer) (concat euporie-cmd "\n"))
+          (sas-workflow-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
+          (with-current-buffer wrds-buffer
+            ;; Use termint send function (not comint)
+            (sas-workflow-debug-log 'debug "Sending euporie command to compute node via termint")
+            (if (fboundp 'termint-wrds-qrsh-send-string)
+                (termint-wrds-qrsh-send-string euporie-cmd)
+              (error "termint-wrds-qrsh-send-string not available"))
+            (sas-workflow-debug-log 'info "Successfully sent euporie command to compute node")
             (euporie-termint-debug-log 'info "Sent euporie command to compute node: %s" euporie-cmd)))
         
-        ;; Display in split window
-        (split-window-right)
-        (other-window 1)
-        (switch-to-buffer wrds-buffer)
-        (other-window -1)
+        ;; Display in split window using proper console display function
+        (sas-workflow-debug-log 'debug "Creating split window layout for remote SAS console")
+        (euporie-termint-display-console-right wrds-buffer)
         
+        (sas-workflow-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
         (euporie-termint-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
         wrds-buffer))))
 
@@ -473,7 +501,13 @@ DIR parameter is used for SAS to determine local vs remote execution."
                     ((string= kernel "sas") #'termint-euporie-sas-send-string)
                     (t (error "Unsupported kernel: %s" kernel)))))
     
+    (sas-workflow-debug-log 'info "=== euporie-termint-send-code called ===")
+    (sas-workflow-debug-log 'debug "Send code - kernel: %s, dir: %s, is-remote-sas: %s" kernel (or dir "nil") is-remote-sas)
+    (sas-workflow-debug-log 'debug "Send code - buffer: %s, send-func: %s" 
+                           (if buffer (buffer-name buffer) "nil") send-func)
+    
     (when buffer
+      (sas-workflow-debug-log 'info "Sending %s code: %s" kernel (substring code 0 (min 50 (length code))))
       (euporie-termint-debug-log 'info "Sending %s code: %s" kernel (substring code 0 (min 50 (length code))))
       
       ;; Display console in right window
@@ -482,10 +516,16 @@ DIR parameter is used for SAS to determine local vs remote execution."
       ;; Send code to console with proper targeting
       (if is-remote-sas
           ;; For remote SAS, send directly to the *euporie-sas* buffer
-          (with-current-buffer buffer
-            (funcall send-func code))
+          (progn
+            (sas-workflow-debug-log 'debug "Using remote SAS send - targeting buffer directly")
+            (with-current-buffer buffer
+              (sas-workflow-debug-log 'debug "Calling send function: %s with code" send-func)
+              (funcall send-func code)))
         ;; For other kernels, use standard approach
-        (funcall send-func code))
+        (progn
+          (when (string= kernel "sas")
+            (sas-workflow-debug-log 'debug "Using local SAS send - standard approach"))
+          (funcall send-func code)))
       
       ;; Start file monitoring for Stata graphics if not already running
       (when (string= kernel "stata")

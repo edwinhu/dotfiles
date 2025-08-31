@@ -194,13 +194,51 @@ Returns a cons cell (START . END)."
                   :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor") ("JUPYTER_CONSOLE" . "1")))
   (termint-jupyter-stata-start))
 
+(defun termint-org-src-smart-sas-start ()
+  "Start SAS euporie console with smart remote connection for org-src integration."
+  (interactive)
+  (termint-org-src-debug-log 'info "Starting smart SAS console")
+  ;; Kill any existing hung buffer first
+  (when (get-buffer "*euporie-sas*")
+    (termint-org-src-debug-log 'info "Killing existing hung *euporie-sas* buffer")
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*euporie-sas*")))
+  
+  ;; For SAS, check if we need remote or local execution
+  (let* ((babel-info (bound-and-true-p org-src--babel-info))
+         (dir (when babel-info (cdr (assoc :dir (nth 2 babel-info))))))
+    
+    (sas-workflow-debug-log 'debug "SAS smart start - babel-info: %s" babel-info)
+    (sas-workflow-debug-log 'debug "SAS smart start - dir: %s" dir)
+    (sas-workflow-debug-log 'debug "SAS smart start - is remote: %s" (when dir (file-remote-p dir)))
+    
+    (if (and dir (file-remote-p dir))
+        (progn
+          (sas-workflow-debug-log 'info "Starting remote SAS euporie console")
+          (termint-org-src-debug-log 'info "Starting remote SAS euporie console")
+          (when (fboundp 'euporie-sas-start-remote)
+            (sas-workflow-debug-log 'debug "Calling euporie-sas-start-remote with dir: %s" dir)
+            (euporie-sas-start-remote dir))
+          (unless (fboundp 'euporie-sas-start-remote)
+            (sas-workflow-debug-log 'error "Function euporie-sas-start-remote not available")))
+      (progn
+        (sas-workflow-debug-log 'info "Starting local SAS euporie console")
+        (termint-org-src-debug-log 'info "Starting local SAS euporie console")
+        ;; Define and start with local command
+        (let ((local-cmd "sh -c 'cd /Users/vwh7mb/projects/wander2 && direnv exec . pixi run euporie console --kernel-name=sas --graphics=sixel'"))
+          (sas-workflow-debug-log 'debug "Local SAS command: %s" local-cmd)
+          (termint-define "euporie-sas" local-cmd
+                          :bracketed-paste-p t
+                          :backend 'eat
+                          :env '(("TERM" . "xterm-kitty") ("COLORTERM" . "truecolor")))))))
+
 (defun termint-org-src-get-console-buffer-name (kernel)
   "Get the expected console buffer name for KERNEL."
   (pcase kernel
     ("python" "*jupyter-python*")
     ("r" "*jupyter-r*")
     ("stata" "*jupyter-stata*")
-    ("sas" "*SAS Console*")  ; SAS uses different naming
+    ("sas" "*euporie-sas*")  ; SAS uses euporie system
     (_ (error "Unknown kernel: %s" kernel))))
 
 (defun termint-org-src-get-start-function (kernel)
@@ -209,7 +247,7 @@ Returns a cons cell (START . END)."
     ("python" 'termint-org-src-smart-python-start)
     ("r" 'termint-org-src-smart-r-start)
     ("stata" 'termint-org-src-smart-stata-start)
-    ("sas" 'sas-console-send-line)  ; SAS uses different approach
+    ("sas" 'termint-org-src-smart-sas-start)
     (_ (error "Unknown kernel: %s" kernel))))
 
 (defun termint-org-src-ensure-console (kernel)
@@ -217,6 +255,7 @@ Returns a cons cell (START . END)."
   (let ((buffer-name (termint-org-src-get-console-buffer-name kernel))
         (start-func (termint-org-src-get-start-function kernel)))
     
+    (sas-workflow-debug-log 'info "Ensuring console for kernel: %s, buffer: %s" kernel buffer-name)
     (termint-org-src-debug-log 'info "Checking for console buffer: %s" buffer-name)
     
     ;; Check if console buffer exists and has a live process
@@ -234,12 +273,14 @@ Returns a cons cell (START . END)."
         
         ;; Console doesn't exist or is dead, start it
         (progn
+          (sas-workflow-debug-log 'info "Starting new console for %s kernel" kernel)
           (termint-org-src-debug-log 'info "Starting new console for %s kernel" kernel)
           (message "Starting %s console..." kernel)
           
           ;; Call the start function
           (condition-case err
               (progn
+                (sas-workflow-debug-log 'debug "Calling start function: %s" start-func)
                 (funcall start-func)
                 (termint-org-src-debug-log 'info "Called start function: %s" start-func)
                 
@@ -253,16 +294,20 @@ Returns a cons cell (START . END)."
                   (let ((new-buffer (get-buffer buffer-name)))
                     (if new-buffer
                         (progn
+                          (sas-workflow-debug-log 'info "Console buffer created: %s" buffer-name)
                           (termint-org-src-debug-log 'info "Console buffer created: %s" buffer-name)
                           (message "%s console ready!" kernel)
                           ;; Display in right split
+                          (sas-workflow-debug-log 'debug "Displaying console in right split")
                           (termint-org-src-display-console-right new-buffer)
                           ;; Give it a moment to fully initialize
                           (sleep-for 1))
                       (progn
+                        (sas-workflow-debug-log 'error "Console buffer not created after %d seconds" max-wait)
                         (termint-org-src-debug-log 'error "Console buffer not created after %d seconds" max-wait)
                         (error "Failed to create %s console buffer" kernel))))))
             (error
+             (sas-workflow-debug-log 'error "Failed to start console: %s" err)
              (termint-org-src-debug-log 'error "Failed to start console: %s" err)
              (error "Failed to start %s console: %s" kernel err))))))
 
@@ -364,10 +409,14 @@ Automatically starts console if it doesn't exist."
                (termint-org-src-debug-log 'debug "Calling termint-jupyter-stata-send-string")
                (termint-jupyter-stata-send-string trimmed-code))
               ("sas" 
-               (termint-org-src-debug-log 'debug "Using SAS console for SAS code")
-               ;; For SAS, use the existing sas-console system
-               (when (fboundp 'sas-console-send-line)
-                 (sas-console-send-line)))
+               (sas-workflow-debug-log 'info "SAS code send requested - kernel: %s" kernel)
+               (termint-org-src-debug-log 'debug "Using SAS euporie for SAS code")
+               ;; For SAS, use the euporie system like other kernels
+               (when (fboundp 'termint-euporie-sas-send-string)
+                 (sas-workflow-debug-log 'debug "Calling termint-euporie-sas-send-string with code")
+                 (termint-euporie-sas-send-string trimmed-code))
+               (unless (fboundp 'termint-euporie-sas-send-string)
+                 (sas-workflow-debug-log 'error "Function termint-euporie-sas-send-string not available")))
               (_ (error "Unknown kernel: %s" kernel)))
             (termint-org-src-debug-log 'info "Code sent successfully")
             ;; Verify console contents after sending
@@ -602,7 +651,7 @@ After sending, advance to the next code line."
       (termint-org-src-debug-log 'info "Function availability - Python: %s, R: %s, Stata: %s" python-send r-send stata-send))
     
     (message "=== End Test ===")
-    (termint-org-src-debug-log 'info "=== TEST COMPLETED ==="))))
+    (termint-org-src-debug-log 'info "=== TEST COMPLETED ===")))))
 
 ;; Initialize logging - disabled to avoid loading issues
 ;; (when (fboundp 'termint-org-src-clear-log)

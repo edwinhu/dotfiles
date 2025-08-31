@@ -2,10 +2,43 @@
 ;; Place your private configuration here! Remember, you do not need to run 'doom
 ;; sync' after modifying this file!
 
-;; Load euporie-termint module for native euporie graphics integration
-(load (expand-file-name "euporie-termint.el" 
-                       (or (bound-and-true-p doom-user-dir)
-                          (expand-file-name "~/.doom.d/"))))
+;; Load required modules for SAS euporie integration
+(let ((doom-dir (or (bound-and-true-p doom-user-dir)
+                   (expand-file-name "~/.doom.d/"))))
+  ;; Load TRAMP WRDS support first (required by euporie-termint)
+  (load (expand-file-name "tramp-wrds.el" doom-dir))
+  ;; Load termint org-src integration
+  (load (expand-file-name "termint-org-src.el" doom-dir))
+  ;; Load euporie-termint module for native euporie graphics integration
+  (load (expand-file-name "euporie-termint.el" doom-dir)))
+
+;; Ensure euporie-termint-display-console-right function is available
+;; (workaround for loading issues)
+(unless (fboundp 'euporie-termint-display-console-right)
+  (defun euporie-termint-display-console-right (buffer &optional original-buffer original-window)
+    "Display console BUFFER in a right split window."
+    (let ((initial-window (or original-window (selected-window)))
+          (initial-buffer (or original-buffer (current-buffer))))
+      
+      ;; Display buffer in right side window
+      (let ((console-window (display-buffer buffer
+                                            '((display-buffer-reuse-window
+                                               display-buffer-in-side-window)
+                                              (side . right)
+                                              (window-width . 0.5)
+                                              (inhibit-same-window . t)))))
+        
+        (when console-window
+          ;; Scroll to bottom in console
+          (with-selected-window console-window
+            (goto-char (point-max)))
+          
+          ;; Restore focus to original window
+          (when (window-live-p initial-window)
+            (select-window initial-window))
+          
+          (when (buffer-live-p initial-buffer)
+            (set-window-buffer (selected-window) initial-buffer)))))))
 
 ;; Initialize euporie-termint immediately after loading
 (when (and (featurep 'euporie-termint)
@@ -138,7 +171,10 @@
 
 ;; Include SAS support
 (use-package! ob-sas
-  :load-path "~/.doom.d/")
+  :load-path "~/.doom.d/"
+  :config
+  ;; Map 'sas' language to SAS-mode for org-src blocks
+  (add-to-list 'org-src-lang-modes '("sas" . SAS)))
 
 ;; Include Stata support
 (use-package! ob-stata
