@@ -209,56 +209,9 @@ Returns buffer ready for command sending."
       (tramp-qrsh-debug-log 'error "Unknown qrsh method: %s" method)
       (error "Unknown qrsh method: %s" method)))))
 
-;;; String Sending Function
-
-(defun termint-qrsh-session-send-string (string)
-  "Send STRING to the active qrsh session buffer.
-Automatically detects which qrsh buffer is active and sends the string
-using the appropriate termint method with bracketed paste support."
-  (let ((active-buffer nil))
-    ;; Find the active qrsh buffer (check in order of preference)
-    (cond
-     ((get-buffer "*qrsh-session*")
-      (setq active-buffer (get-buffer "*qrsh-session*")))
-     ((get-buffer "*qrsh-highmem*")
-      (setq active-buffer (get-buffer "*qrsh-highmem*")))
-     ((get-buffer "*qrsh-now*")
-      (setq active-buffer (get-buffer "*qrsh-now*")))
-     (t
-      (error "No active qrsh session buffer found")))
-    
-    (unless active-buffer
-      (error "Could not find active qrsh session buffer"))
-    
-    (tramp-qrsh-debug-log 'info "Sending string to buffer %s: %s" 
-                          (buffer-name active-buffer)
-                          (substring string 0 (min 50 (length string))))
-    
-    ;; Send string to the active buffer with bracketed paste
-    (with-current-buffer active-buffer
-      (let ((process (get-buffer-process (current-buffer))))
-        (unless process
-          (error "No process found in qrsh buffer %s" (buffer-name active-buffer)))
-        
-        ;; Check if process is running
-        (unless (eq (process-status process) 'run)
-          (error "qrsh process is not running in buffer %s" (buffer-name active-buffer)))
-        
-        ;; Send with bracketed paste support
-        (tramp-qrsh-debug-log 'debug "Sending bracketed paste start sequence")
-        (process-send-string process "\e[200~")  ; Begin bracketed paste
-        
-        (tramp-qrsh-debug-log 'debug "Sending actual string content")
-        (process-send-string process string)
-        
-        (tramp-qrsh-debug-log 'debug "Sending bracketed paste end sequence")
-        (process-send-string process "\e[201~")  ; End bracketed paste
-        
-        ;; Send newline to execute
-        (process-send-string process "\n")
-        
-        (tramp-qrsh-debug-log 'info "Successfully sent string to qrsh session")
-        t))))
+;;; Connection Management Only
+;;; tramp-qrsh.el is responsible ONLY for establishing qrsh connections
+;;; All buffer management and code sending is handled by euporie-termint.el
 
 ;;; Utility Functions
 

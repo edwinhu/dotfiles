@@ -159,14 +159,22 @@ Maps euporie kernel names back to simple names for consistency."
 
 (defun euporie-termint-get-or-create-buffer (kernel &optional dir)
   "Get or create euporie termint buffer for KERNEL.
-DIR parameter is used for SAS to determine local vs remote execution."
-  (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
+DIR parameter determines local vs remote execution for any kernel."
+  (let* ((remote-info (euporie-termint--detect-remote-mode dir))
+         (is-remote (not (null remote-info)))
+         (is-qrsh (eq remote-info 'qrsh-tramp))
          (buffer-kernel (euporie-termint--normalize-buffer-kernel kernel))
-         (buffer-name (format "*euporie-%s*" buffer-kernel))
+         (buffer-name (cond
+                       ;; QRSH buffers keep original name for compatibility
+                       (is-qrsh "*qrsh-session*")
+                       ;; Standard remote buffers use kernel-specific names
+                       (is-remote (format "*euporie-%s-remote*" buffer-kernel))
+                       ;; Local buffers use kernel-specific names
+                       (t (format "*euporie-%s*" buffer-kernel))))
          (buffer (get-buffer buffer-name)))
     
     (euporie-termint-debug-log 'info "Getting or creating buffer for %s kernel (remote: %s)" 
-                               kernel is-remote-sas)
+                               kernel is-remote)
     
     ;; Check if buffer exists and has live process
     (if (and buffer 
@@ -209,11 +217,19 @@ DIR parameter is used for SAS to determine local vs remote execution."
 
 (defun euporie-termint-start (kernel &optional dir)
   "Universal function to start KERNEL console with optional DIR for remote execution."
-  (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
+  (let* ((remote-info (euporie-termint--detect-remote-mode dir))
+         (is-remote (not (null remote-info)))
+         (is-qrsh (eq remote-info 'qrsh-tramp))
          (buffer-kernel (euporie-termint--normalize-buffer-kernel kernel))
-         (buffer-name (format "*euporie-%s*" buffer-kernel)))
+         (buffer-name (cond
+                       ;; QRSH buffers keep original name for compatibility
+                       (is-qrsh "*qrsh-session*")
+                       ;; Standard remote buffers use kernel-specific names
+                       (is-remote (format "*euporie-%s-remote*" buffer-kernel))
+                       ;; Local buffers use kernel-specific names
+                       (t (format "*euporie-%s*" buffer-kernel)))))
     
-    (euporie-termint-debug-log 'info "Starting %s console (remote: %s)" kernel is-remote-sas)
+    (euporie-termint-debug-log 'info "Starting %s console (remote: %s, mode: %s)" kernel is-remote remote-info)
     
     ;; Kill any existing buffer first
     (when (get-buffer buffer-name)
@@ -221,11 +237,11 @@ DIR parameter is used for SAS to determine local vs remote execution."
         (kill-buffer buffer-name)))
     
     (cond
-     ;; Remote SAS uses tramp-qrsh-session
-     (is-remote-sas
-      (euporie-termint-start-remote-sas dir))
+     ;; Remote execution - use universal remote function
+     (is-remote
+      (euporie-termint-start-remote-universal kernel dir))
      
-     ;; All other cases use local termint
+     ;; Local execution - use existing local termint
      (t
       (euporie-termint-start-local kernel)))))
 
@@ -319,56 +335,193 @@ DIR parameter is used for SAS to determine local vs remote execution."
      
      (t (error "Unsupported kernel: %s" kernel)))))
 
-(defun euporie-termint-start-remote-sas (remote-dir)
-  "Start remote SAS euporie console using tramp-qrsh-session."
-  (let* ((localname (if (file-remote-p remote-dir)
-                        (file-remote-p remote-dir 'localname)
-                      remote-dir)))
+;;; Universal Remote Detection and Configuration
+
+(defun euporie-termint--detect-remote-mode (dir)
+  "Detect remote execution mode from directory path.
+Returns: 'standard-tramp, 'qrsh-tramp, or nil (local)
+Works for ALL kernels: Python, R, Stata, and SAS."
+  (euporie-termint-debug-log 'debug "=== euporie-termint--detect-remote-mode ENTRY ===")
+  (euporie-termint-debug-log 'debug "  dir: %s" dir)
+  (euporie-termint-debug-log 'debug "  dir is nil?: %s" (null dir))
+  (euporie-termint-debug-log 'debug "  file-remote-p dir: %s" (when dir (file-remote-p dir)))
+  
+  (when (and dir (file-remote-p dir))
+    (let ((path (file-remote-p dir 'localname))
+          (result (if (string-match-p "|qrsh:" dir)
+                      'qrsh-tramp
+                    'standard-tramp)))
+      (euporie-termint-debug-log 'debug "  remote path detected: %s" path)
+      (euporie-termint-debug-log 'debug "  |qrsh: match: %s" (string-match-p "|qrsh:" dir))
+      (euporie-termint-debug-log 'debug "  returning: %s" result)
+      result)))
+
+(defun euporie-termint--get-remote-config (kernel dir)
+  "Get remote configuration for KERNEL and DIR.
+Returns: (remote-type . connection-info)
+Universal function that works for ALL kernels: Python, R, Stata, and SAS."
+  (when dir
+    (let ((remote-mode (euporie-termint--detect-remote-mode dir)))
+      (when remote-mode
+        (let ((host (file-remote-p dir 'host))
+              (localname (if (eq remote-mode 'qrsh-tramp)
+                           ;; For QRSH TRAMP, extract path after |qrsh: patterns
+                           (cond
+                            ((string-match "|qrsh::\\(.+\\)$" dir) (match-string 1 dir))
+                            ((string-match "|qrsh:[^:]*:\\(.+\\)$" dir) (match-string 1 dir))
+                            (t (file-remote-p dir 'localname)))
+                         (file-remote-p dir 'localname))))
+          (cons remote-mode
+                (list :host host :localname localname :kernel kernel)))))))
+
+(defun euporie-termint--build-remote-euporie-command (kernel localname)
+  "Build remote euporie command for KERNEL in LOCALNAME directory.
+Universal function supporting ALL kernels: Python, R, Stata, and SAS."
+  (let ((graphics-protocol euporie-termint-graphics-protocol)
+        (kernel-name (cond
+                     ((or (string= kernel "python") (string= kernel "python3")) "python3")
+                     ((or (string= kernel "r") (string= kernel "ir")) "ir")
+                     ((string= kernel "stata") "stata")
+                     ((string= kernel "sas") "sas")
+                     (t kernel))))
+    (format "cd %s 2>/dev/null && export PATH=/home/nyu/eddyhu/env/bin:$PATH >/dev/null 2>&1 && clear && exec euporie-console --graphics=%s --kernel-name=%s" 
+            localname graphics-protocol kernel-name)))
+
+;;; Universal Remote Session Management
+
+
+(defun euporie-termint-start-remote-universal (kernel remote-dir)
+  "Universal function to start remote KERNEL console for ALL kernels.
+Supports Python, R, Stata, and SAS with both standard TRAMP and QRSH TRAMP modes.
+Automatically detects remote mode and uses appropriate connection method."
+  (let* ((remote-config (euporie-termint--get-remote-config kernel remote-dir))
+         (remote-mode (car remote-config))
+         (connection-info (cdr remote-config)))
     
-    (euporie-termint-debug-log 'info "Starting remote SAS console for dir: %s" remote-dir)
+    (euporie-termint-debug-log 'info "Starting remote %s console in mode %s for dir: %s" 
+                               kernel remote-mode remote-dir)
     
-    ;; Use tramp-qrsh-session to get to compute node
-    (let ((qrsh-buffer (tramp-qrsh-session)))
-      
-      (if qrsh-buffer
-          (progn
-            (euporie-termint-debug-log 'info "Got qrsh buffer: %s" (buffer-name qrsh-buffer))
+    (cond
+     ;; QRSH TRAMP mode - use qrsh session
+     ((eq remote-mode 'qrsh-tramp)
+      (let* ((localname (plist-get connection-info :localname))
+             (qrsh-buffer (tramp-qrsh-session)))
+        
+        (if qrsh-buffer
+            (progn
+              (euporie-termint-debug-log 'info "Got qrsh buffer for %s: %s" kernel (buffer-name qrsh-buffer))
+              (euporie-termint-debug-log 'info "Keeping original QRSH buffer name for compatibility")
+              
+              ;; DO NOT rename buffer - keep as *qrsh-session* for QRSH function compatibility
+              ;; Send euporie command to the compute node shell using process directly
+              (let ((euporie-cmd (euporie-termint--build-remote-euporie-command kernel localname))
+                    (process (get-buffer-process qrsh-buffer)))
+                (euporie-termint-debug-log 'info "Sending %s euporie command: %s" kernel euporie-cmd)
+                (unless process
+                  (error "No process found in qrsh buffer %s" (buffer-name qrsh-buffer)))
+                
+                ;; Send euporie command with bracketed paste (like deleted tramp-qrsh function)
+                (process-send-string process "\e[200~")  ; Begin bracketed paste
+                (process-send-string process euporie-cmd)
+                (process-send-string process "\e[201~")  ; End bracketed paste
+                (process-send-string process "\n")       ; Execute
+                
+                ;; Display in split window
+                (euporie-termint-display-console-right qrsh-buffer)
+                
+                (euporie-termint-debug-log 'info "Remote %s setup complete via QRSH" kernel)
+                qrsh-buffer))
+          (error "tramp-qrsh-session failed to establish connection"))))
+     
+     ;; Standard TRAMP mode - use regular remote execution
+     ((eq remote-mode 'standard-tramp)
+      (let* ((host (plist-get connection-info :host))
+             (localname (plist-get connection-info :localname))
+             (buffer-kernel (euporie-termint--normalize-buffer-kernel kernel))
+             (buffer-name (format "*euporie-%s-remote*" buffer-kernel))
+             (default-directory remote-dir))
+        
+        (euporie-termint-debug-log 'info "Starting %s via standard TRAMP on %s:%s" kernel host localname)
+        
+        ;; Kill existing remote buffer if it exists
+        (when (get-buffer buffer-name)
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer buffer-name)))
+        
+        ;; Create remote process using start-file-process
+        (let* ((process-name (format "euporie-%s-remote" buffer-kernel))
+               (euporie-cmd (format "euporie-console --graphics=%s --kernel-name=%s" 
+                                  euporie-termint-graphics-protocol
+                                  (cond
+                                   ((or (string= kernel "python") (string= kernel "python3")) "python3")
+                                   ((or (string= kernel "r") (string= kernel "ir")) "ir")
+                                   ((string= kernel "stata") "stata")
+                                   ((string= kernel "sas") "sas")
+                                   (t kernel))))
+               (buffer (get-buffer-create buffer-name)))
+          
+          (with-current-buffer buffer
+            ;; Set up comint mode for remote interaction
+            (unless (derived-mode-p 'comint-mode)
+              (comint-mode))
             
-            ;; Send euporie command to the compute node shell
-            (let ((euporie-cmd (format "cd %s 2>/dev/null && export PATH=/home/nyu/eddyhu/env/bin:$PATH >/dev/null 2>&1 && clear && exec euporie console --kernel-name=sas --graphics=sixel" localname)))
-              (euporie-termint-debug-log 'info "Sending euporie command: %s" euporie-cmd)
-              (with-current-buffer qrsh-buffer
-                ;; Use termint send function if available
-                (if (fboundp 'termint-qrsh-session-send-string)
-                    (termint-qrsh-session-send-string euporie-cmd)
-                  (error "termint-qrsh-session-send-string not available")))
-              
-              ;; Display in split window
-              (euporie-termint-display-console-right qrsh-buffer)
-              
-              (euporie-termint-debug-log 'info "Remote SAS setup complete")
-              qrsh-buffer))
-        (error "tramp-qrsh-session failed to establish connection")))))
+            (let ((process (start-file-process process-name buffer "bash" "-c" euporie-cmd)))
+              (if process
+                  (progn
+                    (set-process-filter process 'comint-output-filter)
+                    (euporie-termint-debug-log 'info "Started remote %s process via standard TRAMP" kernel)
+                    
+                    ;; Display in split window
+                    (euporie-termint-display-console-right buffer)
+                    buffer)
+                (error "Failed to start remote %s process" kernel)))))))
+     
+     (t
+      (error "Unknown remote mode: %s" remote-mode)))))
 
 ;;; Universal Code Sending
 
 (defun euporie-termint-send-code (kernel code &optional dir display-mode)
   "Send CODE to euporie console for KERNEL.
-DIR parameter is used for SAS to determine local vs remote execution.
+DIR parameter determines local vs remote execution for any kernel.
 DISPLAY-MODE can be 'current-window or 'split-right (default)."
-  (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
+  (euporie-termint-debug-log 'debug "=== euporie-termint-send-code ENTRY ===")
+  (euporie-termint-debug-log 'debug "  kernel: %s" kernel)
+  (euporie-termint-debug-log 'debug "  dir parameter: %s" dir)
+  (euporie-termint-debug-log 'debug "  dir type: %s" (type-of dir))
+  (euporie-termint-debug-log 'debug "  file-remote-p result: %s" (when dir (file-remote-p dir)))
+  
+  (let* ((remote-info (euporie-termint--detect-remote-mode dir))
+         (is-remote (not (null remote-info)))
+         (is-qrsh-remote (eq remote-info 'qrsh-tramp))
          (buffer (euporie-termint-get-or-create-buffer kernel dir))
          (send-func (cond
+                    ;; QRSH remote execution - handle code sending via process directly in QRSH buffer
+                    (is-qrsh-remote
+                     (lambda (process string)
+                       "Send string to QRSH process with bracketed paste support."
+                       (euporie-termint-debug-log 'debug "QRSH send-func: sending to process %s" process)
+                       (process-send-string process "\e[200~")  ; Begin bracketed paste
+                       (process-send-string process string)
+                       (process-send-string process "\e[201~")  ; End bracketed paste
+                       (process-send-string process "\n")))     ; Execute
+                    ;; Standard TRAMP remote execution
+                    (is-remote
+                     #'comint-send-string)
+                    ;; Local execution - use kernel-specific termint functions  
                     ((or (string= kernel "python") (string= kernel "python3")) #'termint-euporie-python-send-string)
                     ((or (string= kernel "r") (string= kernel "ir")) #'termint-euporie-r-send-string)
                     ((string= kernel "stata") #'termint-euporie-stata-send-string)
-                    ((and (string= kernel "sas") is-remote-sas) 
-                     #'termint-qrsh-session-send-string)  ; Use qrsh-specific send function
                     ((string= kernel "sas") #'termint-euporie-sas-send-string)
                     (t (error "Unsupported kernel: %s" kernel)))))
     
-    (euporie-termint-debug-log 'info "Sending %s code (remote: %s): %s" 
-                               kernel is-remote-sas (substring code 0 (min 50 (length code))))
+    (euporie-termint-debug-log 'debug "  remote-info: %s" remote-info)
+    (euporie-termint-debug-log 'debug "  is-remote: %s" is-remote)
+    (euporie-termint-debug-log 'debug "  is-qrsh-remote: %s" is-qrsh-remote)
+    (euporie-termint-debug-log 'debug "  selected send-func: %s" send-func)
+    
+    (euporie-termint-debug-log 'info "Sending %s code (remote: %s, qrsh: %s): %s" 
+                               kernel is-remote is-qrsh-remote (substring code 0 (min 50 (length code))))
     
     (when buffer
       ;; Display console based on display-mode
@@ -380,20 +533,32 @@ DISPLAY-MODE can be 'current-window or 'split-right (default)."
       (euporie-termint-debug-log 'info "About to send code using %s to buffer %s" send-func (buffer-name buffer))
       (euporie-termint-debug-log 'info "Buffer process: %s" (get-buffer-process buffer))
       
-      (if is-remote-sas
-          ;; For remote SAS, send directly to the buffer
-          (progn
-            (euporie-termint-debug-log 'debug "Using remote SAS send")
-            (with-current-buffer buffer
-              (funcall send-func code)))
-        ;; For other kernels, use standard approach
+      (cond
+       ;; QRSH remote execution - send directly to the buffer  
+       (is-qrsh-remote
+        (progn
+          (euporie-termint-debug-log 'debug "Using QRSH remote send for %s" kernel)
+          (with-current-buffer buffer
+            (funcall send-func code))))
+       
+       ;; Standard TRAMP remote execution - use comint-send-string with process
+       (is-remote
+        (let ((process (get-buffer-process buffer)))
+          (if process
+              (progn
+                (euporie-termint-debug-log 'debug "Using standard TRAMP remote send for %s" kernel)
+                (funcall send-func process (concat code "\n")))
+            (error "No process found for remote %s buffer" kernel))))
+       
+       ;; Local execution - use standard termint approach
+       (t
         (condition-case err
             (progn
               (funcall send-func code)
               (euporie-termint-debug-log 'info "Code sent successfully using %s" send-func))
           (error 
            (euporie-termint-debug-log 'error "Send function failed: %s" err)
-           (error "Failed to send code: %s" err))))
+           (error "Failed to send code: %s" err)))))
       
       ;; Start file monitoring for Stata graphics if not already running
       (when (string= kernel "stata")
@@ -424,14 +589,20 @@ DISPLAY-MODE can be 'current-window or 'split-right (default)."
 (defun euporie-termint--send-region-or-line-internal (&optional display-mode)
   "Internal function to send current region or line with specified display mode."
   
+  (euporie-termint-debug-log 'debug "=== euporie-termint--send-region-or-line-internal ENTRY ===")
+  (euporie-termint-debug-log 'debug "  major-mode: %s" major-mode)
+  (euporie-termint-debug-log 'debug "  default-directory: %s" default-directory)
+  
   (let* ((kernel (euporie-termint-detect-kernel))
-         ;; Detect TRAMP path for remote execution - check org-babel :dir parameter
-         (current-dir (if (and (eq major-mode 'org-mode) (string= kernel "sas"))
-                          ;; For SAS in org-mode, extract :dir from code block
+         ;; Detect TRAMP path for remote execution - check org-babel :dir parameter for any kernel
+         (current-dir (if (eq major-mode 'org-mode)
+                          ;; For any kernel in org-mode, extract :dir from code block
                           (let ((element (org-element-at-point)))
+                            (euporie-termint-debug-log 'debug "  org-element type: %s" (org-element-type element))
                             (when (eq (org-element-type element) 'src-block)
-                              (or (org-element-property :dir element)
-                                  default-directory)))
+                              (let ((dir-prop (org-element-property :dir element)))
+                                (euporie-termint-debug-log 'debug "  :dir property: %s" dir-prop)
+                                (or dir-prop default-directory))))
                         default-directory))
          (code (cond
                 ((use-region-p)
@@ -445,11 +616,14 @@ DISPLAY-MODE can be 'current-window or 'split-right (default)."
                 (t
                  (thing-at-point 'line t)))))
     
+    (euporie-termint-debug-log 'debug "  detected kernel: %s" kernel)
+    (euporie-termint-debug-log 'debug "  resolved current-dir: %s" current-dir)
+    (euporie-termint-debug-log 'debug "  code length: %s" (when code (length code)))
+    
     (when code
       (euporie-termint-debug-log 'info "Executing %s code via euporie in dir: %s" kernel current-dir)
-      (if (and (string= kernel "sas") (file-remote-p current-dir))
-          (euporie-termint-send-code kernel code current-dir display-mode)
-        (euporie-termint-send-code kernel code nil display-mode)))))
+      ;; Universal remote detection - pass directory for any kernel that might be remote
+      (euporie-termint-send-code kernel code current-dir display-mode))))
 
 ;; Backward compatibility - keep the old function name
 (defun euporie-termint-send-region-or-line ()
@@ -471,6 +645,48 @@ Defaults to split-right behavior."
   "Set up euporie-termint integration."
   ;; No specific setup needed currently, but keeping for future use
   nil)
+
+;;; SAS Interface Functions (Architecture Compliance)
+
+(defun euporie-sas-start-session ()
+  "Start a SAS euporie session with buffer creation and management."
+  (interactive)
+  (euporie-termint-debug-log 'info "Starting SAS session via euporie-sas-start-session")
+  (let ((buffer (euporie-termint-get-or-create-buffer "sas" default-directory)))
+    (when buffer
+      (euporie-termint-display-console-right buffer)
+      (euporie-termint-debug-log 'info "SAS session started successfully"))
+    buffer))
+
+(defun euporie-sas-send-string (string)
+  "Send STRING directly to SAS euporie console."
+  (interactive "sSAS code: ")
+  (euporie-termint-debug-log 'info "Sending string to SAS console: %s" 
+                             (substring string 0 (min 50 (length string))))
+  (let ((buffer (get-buffer "*euporie-sas*")))
+    (unless buffer
+      (setq buffer (euporie-sas-start-session)))
+    (when buffer
+      (let ((process (get-buffer-process buffer)))
+        (if process
+            (progn
+              (termint-euporie-sas-send-string process string)
+              (euporie-termint-display-console-right buffer))
+          (error "No process found in SAS euporie buffer"))))
+    t))
+
+(defun euporie-sas-send-region (start end)
+  "Send region from START to END to SAS euporie console."
+  (interactive "r")
+  (let ((code (buffer-substring-no-properties start end)))
+    (euporie-sas-send-string code)))
+
+(defun euporie-sas-execute (code &optional dir)
+  "Unified SAS execution interface for both local and remote execution.
+Execute CODE in DIR directory, handling TRAMP paths appropriately."
+  (euporie-termint-debug-log 'info "euporie-sas-execute called with dir: %s" dir)
+  (let ((target-dir (or dir default-directory)))
+    (euporie-termint-send-code "sas" code target-dir 'split-right)))
 
 ;;; Stata Graphics Monitor (Preserve existing functionality)
 
@@ -511,35 +727,44 @@ Defaults to split-right behavior."
         (setq euporie-termint-last-stata-graph-count current-count)))))
 
 ;;; Org-babel Integration
+;; ALL org-babel functions now support remote execution via :dir parameter
+;; Works with both standard TRAMP (/sshx:server:/path) and QRSH TRAMP (/sshx:server:|qrsh::/path)
 
 (defun org-babel-execute:python (body params)
-  "Execute Python BODY with PARAMS using euporie."
-  (let ((buffer (euporie-termint-get-or-create-buffer "python")))
-    (when buffer
-      (euporie-termint-send-code "python" body)
-      ;; For org-babel, we don't return output as euporie handles display
-      "")))
+  "Execute Python BODY with PARAMS using euporie.
+Supports remote execution via :dir parameter."
+  (let ((dir (cdr (assoc :dir params))))
+    (euporie-termint-debug-log 'info "Python execution requested with dir: %s" dir)
+    (euporie-termint-send-code "python" body dir)
+    ;; For org-babel, we don't return output as euporie handles display
+    ""))
 
 (defun org-babel-execute:R (body params)
-  "Execute R BODY with PARAMS using euporie."
-  (let ((buffer (euporie-termint-get-or-create-buffer "r")))
-    (when buffer
-      (euporie-termint-send-code "r" body)
-      ;; For org-babel, we don't return output as euporie handles display
-      "")))
+  "Execute R BODY with PARAMS using euporie.
+Supports remote execution via :dir parameter."
+  (let ((dir (cdr (assoc :dir params))))
+    (euporie-termint-debug-log 'info "R execution requested with dir: %s" dir)
+    (euporie-termint-send-code "r" body dir)
+    ;; For org-babel, we don't return output as euporie handles display
+    ""))
 
 (defun org-babel-execute:stata (body params)
-  "Execute Stata BODY with PARAMS using euporie."
-  (let ((buffer (euporie-termint-get-or-create-buffer "stata")))
-    (when buffer
-      (euporie-termint-send-code "stata" body)
-      ;; For org-babel, we don't return output as euporie handles display
-      "")))
+  "Execute Stata BODY with PARAMS using euporie.
+Supports remote execution via :dir parameter."
+  (let ((dir (cdr (assoc :dir params))))
+    (euporie-termint-debug-log 'info "Stata execution requested with dir: %s" dir)
+    (euporie-termint-send-code "stata" body dir)
+    ;; For org-babel, we don't return output as euporie handles display
+    ""))
 
 (defun org-babel-execute:sas (body params)
   "Execute SAS BODY with PARAMS using euporie.
 Supports remote execution via :dir parameter."
   (let ((dir (cdr (assoc :dir params))))
+    (euporie-termint-debug-log 'debug "=== org-babel-execute:sas ENTRY ===")
+    (euporie-termint-debug-log 'debug "  params: %s" params)
+    (euporie-termint-debug-log 'debug "  extracted dir: %s" dir)
+    (euporie-termint-debug-log 'debug "  dir type: %s" (type-of dir))
     (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
     (euporie-termint-send-code "sas" body dir)
     ;; For org-babel, we don't return output as euporie handles display
@@ -606,22 +831,25 @@ Supports remote execution via :dir parameter."
 
 (defun test-remote-execution (kernel remote-dir)
   "Test remote execution for KERNEL in REMOTE-DIR."
-  (interactive (list (completing-read "Kernel: " '("sas")) 
-                    (read-directory-name "Remote directory: " "/sshx:wrds:/home/")))
-  (if (string= kernel "sas")
-      (let ((test-code "data _null_; put 'Hello from remote SAS'; put 'Remote dir test successful'; run;"))
-        (message "Testing %s remote execution in %s..." kernel remote-dir)
-        (euporie-termint-debug-log 'info "Running test-remote-execution for %s in %s" kernel remote-dir)
-        (condition-case err
-            (progn
-              (euporie-termint-send-code kernel test-code remote-dir)
-              (message "✓ Remote test code sent to %s console" kernel)
-              t)
-          (error
-           (message "✗ Failed to send remote test code to %s: %s" kernel err)
-           (euporie-termint-debug-log 'error "test-remote-execution failed for %s: %s" kernel err)
-           nil)))
-    (message "Remote execution only supported for SAS kernel")))
+  (interactive (list (completing-read "Kernel: " '("python" "r" "stata" "sas")) 
+                    (read-directory-name "Remote directory: " "/sshx:server:/home/")))
+  (let ((test-code (cond
+                    ((string= kernel "python") "print('Hello from remote Python')\\nprint('Remote dir test successful')")
+                    ((string= kernel "r") "cat('Hello from remote R\\n')\\ncat('Remote dir test successful\\n')")
+                    ((string= kernel "stata") "display \"Hello from remote Stata\"\\ndisplay \"Remote dir test successful\"")
+                    ((string= kernel "sas") "data _null_; put 'Hello from remote SAS'; put 'Remote dir test successful'; run;")
+                    (t "# Remote test for unknown kernel"))))
+    (message "Testing %s remote execution in %s..." kernel remote-dir)
+    (euporie-termint-debug-log 'info "Running test-remote-execution for %s in %s" kernel remote-dir)
+    (condition-case err
+        (progn
+          (euporie-termint-send-code kernel test-code remote-dir)
+          (message "✓ Remote test code sent to %s console" kernel)
+          t)
+      (error
+       (message "✗ Failed to send remote test code to %s: %s" kernel err)
+       (euporie-termint-debug-log 'error "test-remote-execution failed for %s: %s" kernel err)
+       nil))))
 
 (defun test-window-management (kernel)
   "Test window management for KERNEL."
