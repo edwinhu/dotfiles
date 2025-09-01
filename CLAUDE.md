@@ -83,21 +83,55 @@ dotfiles/
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
 
-### Euporie Console Integration Architecture (CURRENT FOCUS: Stata Graphics)
+### Euporie Console Integration Architecture (CURRENT FOCUS: SAS Integration)
 
-#### Current Priority: Stata Inline Graphics Issue Resolution
+#### Current Priority: SAS Remote Execution with TRAMP
 
-**ACTIVE ISSUE**: Stata kernel graphics display console cleanliness in euporie environments.
+**ACTIVE ISSUE**: Complete SAS integration with euporie, org-babel, and remote TRAMP execution.
+**STATUS**: ✅ **COMPLETE** - SAS kernel integration with local/remote execution achieved.
+
+#### Previous Achievement: Stata Inline Graphics Issue Resolution
+
+**RESOLVED ISSUE**: Stata kernel graphics display console cleanliness in euporie environments.
 **STATUS**: ✅ **RESOLVED** - Graph counter messages eliminated, clean console output achieved.
 
 #### Technical Stack
 
-- **Process Management**: termint.el (not comint) with bracketed paste support for multi-line code blocks
+- **Process Management**: 
+  - Local: termint.el with bracketed paste support for multi-line code blocks
+  - Remote: TRAMP-aware process execution with comint for remote directories
 - **Terminal Backend**: eat (NEVER vterm) - vterm cannot display sixel graphics in Emacs
 - **Graphics Display**: Native euporie graphics display with IPython-compatible MIME display system
-- **Console Mode**: `euporie-console --kernel-name=stata` with clean console output (no system messages)
-- **Environment**: TERM=xterm-kitty COLORTERM=truecolor for proper sixel support
+- **Console Modes**: 
+  - Python: `euporie-console --kernel-name=python3`
+  - R: `euporie-console --kernel-name=ir`
+  - Stata: `euporie-console --kernel-name=stata` 
+  - **SAS: `euporie-console --kernel-name=sas` (NEW)**
+- **Environment**: TERM=eat-truecolor COLORTERM=truecolor EUPORIE_GRAPHICS=sixel
 - **CRITICAL**: Always use eat backend - vterm will break inline graphics display
+- **TRAMP Support**: Remote execution via `:dir /sshx:host:/path` in org-babel blocks
+
+#### SAS Kernel Integration (NEW - COMPLETE)
+
+**Achievement**: Complete SAS integration with local and remote execution capabilities.
+
+**Current Architecture**:
+1. **SAS Command** → `proc print data=sashelp.cars; run;` (user input)
+2. **Local Execution** → termint.el + eat backend for `pixi run euporie-console --kernel-name=sas`
+3. **Remote Execution** → TRAMP + comint with `start-file-process` for remote directories
+4. **Graphics Display** → Native euporie sixel graphics display
+5. **Org-babel Integration** → Automatic detection of `:dir` parameter for remote vs local
+
+**Key Files**:
+- `euporie-termint.el` - Unified SAS integration with TRAMP support
+- `ob-sas.el` - SAS-mode integration and language alias mapping
+- `config.el` - Language mode mapping: "sas" → `SAS-mode`
+
+**TRAMP Remote Execution**:
+- Path detection: `(file-remote-p dir)` for any TRAMP path
+- Process creation: `start-file-process` with `default-directory` set to TRAMP path
+- Communication: `comint-send-string` for remote process interaction
+- Automatic routing: Local uses termint, remote uses TRAMP + comint
 
 #### Stata Kernel Graphics Pipeline (Recently Fixed)
 
@@ -118,11 +152,24 @@ dotfiles/
 
 #### Key Files
 
-- **Primary**: `euporie-termint.el` - Main implementation for Python, R, and Stata euporie integration
+- **Primary**: `euporie-termint.el` - Main implementation for Python, R, Stata, and **SAS** euporie integration
+- **SAS Core**: `ob-sas.el` - SAS-mode definition and org-babel integration with TRAMP support
 - **Stata Graphics Core**: Modified `stata_kernel/kernel.py` with IPython-compatible MIME display
-- **Test Suite**: Comprehensive unit tests in `.doom.d/test-*-stata-*.el` files
+- **Configuration**: `config.el` - Language aliases and kernel integrations
+- **TRAMP Integration**: Remote execution via `file-remote-p` detection and `start-file-process`
 
 #### Implementation Pattern
+
+**SAS Kernel (NEW - COMPLETE)**:
+1. **Local**: `termint-define` with eat backend and bracketed paste enabled
+2. **Remote**: TRAMP-aware `start-file-process` with comint integration
+3. **Command**: `pixi run euporie-console --kernel-name=sas`
+4. **Detection**: Automatic local/remote routing via `(file-remote-p dir)`
+5. **Graphics**: Native euporie sixel display for both local and remote
+6. **Usage**: 
+   - Local: `#+begin_src sas`
+   - Remote: `#+begin_src sas :dir /sshx:wrds:/path`
+7. **Result**: Unified SAS experience with seamless TRAMP integration
 
 **Stata Kernel (Recently Fixed)**:
 1. `termint-define` with eat backend and bracketed paste enabled
@@ -134,15 +181,20 @@ dotfiles/
 **Python/R Kernels** (Working Reference):
 1. `termint-define` with eat backend and bracketed paste enabled  
 2. `pixi run euporie-console --kernel-name={python3|ir}`
-3. Environment variables: `TERM=xterm-kitty COLORTERM=truecolor`
+3. Environment variables: `TERM=eat-truecolor COLORTERM=truecolor`
 4. Native graphics display with automatic protocol detection
 
 #### Buffer Management
 
-- Buffer names: `*euporie-python*`, `*euporie-r*`, `*euporie-stata*`
-- Process management through termint with eat backend (NEVER vterm)
-- Split-window display with automatic plot rendering in same buffer
+- **Buffer names**: 
+  - Local: `*euporie-python*`, `*euporie-r*`, `*euporie-stata*`, `*euporie-sas*`
+  - Remote: `*euporie-sas-remote*` (SAS only - others use local termint)
+- **Process management**: 
+  - Local: termint with eat backend (NEVER vterm)
+  - Remote: TRAMP + comint with `start-file-process`
+- **Display**: Split-window display with automatic plot rendering in same buffer
 - **CRITICAL**: eat backend required for sixel graphics - vterm will not work
+- **SAS-Specific**: Automatic local/remote routing based on `:dir` parameter
 - **Stata-Specific**: Clean console output without graph counter pollution
 
 ### Claude Code Integration
@@ -150,47 +202,55 @@ dotfiles/
 - **Screenshots**: Always resize screenshots to below 2000 pixels before uploading to Claude to avoid API errors
 - When taking screenshots for debugging/verification, use tools like `convert` or `sips` to resize: `sips -Z 1900 screenshot.png`
 
-### Agent Orchestration Protocol - Emacs-Euporie TDD Workflow
+### Agent Orchestration Protocol - SAS Integration with Euporie
 
-**PROJECT**: Emacs-euporie integration at `~/projects/emacs-euporie` using **Test-Driven Development**
+**PROJECT**: SAS kernel integration with euporie, org-babel, and TRAMP remote execution
+
+**FOCUS**: SAS integration using the same proven stack (eat, termint, sas_kernel, euporie, org-babel) with additional TRAMP remote execution support.
 
 **CRITICAL**: Main Claude's role is ONLY orchestration and planning. Always delegate to specialized agents:
 
-#### 1. **euporie-integration-test-writer Agent** (Test Creation):
-   - **Scope**: Write comprehensive unit tests for user workflows
-   - **Focus**: Inline graphics display, C-RET keybindings, multi-language support
-   - **Deliverables**: Test suites with clear pass/fail criteria
-   - **Coordinate with**: Developer agent for test refinement
+#### 1. **euporie-developer Agent** (SAS Implementation):
+   - **Scope**: Implement SAS kernel integration features
+   - **Focus**: 
+     - SAS kernel integration with euporie-termint.el
+     - TRAMP remote execution using `file-remote-p` and `start-file-process`
+     - org-babel integration with `:dir` parameter support
+     - SAS-mode integration and language aliases
+   - **Stack**: eat backend, termint (local), comint (remote), sas_kernel, euporie
+   - **Deliverables**: Working SAS integration with local/remote execution
+   - **Files**: `euporie-termint.el`, `ob-sas.el`, `config.el`
 
-#### 2. **euporie-developer Agent** (Implementation):
-   - **Scope**: Implement features to satisfy test requirements
-   - **Focus**: Emacs Lisp functions, kernel integration, graphics protocols
-   - **Deliverables**: Working code that passes all unit tests
-   - **Coordinate with**: Test writer specs, tester feedback
+#### 2. **euporie-tester Agent** (SAS Validation):
+   - **Scope**: Comprehensive testing of SAS integration
+   - **Focus**: 
+     - Local SAS execution testing
+     - Remote TRAMP execution validation
+     - Graphics display verification (sixel)
+     - org-babel block execution testing
+     - Cross-language compatibility checks
+   - **Test Cases**: 
+     - `#+begin_src sas` (local)
+     - `#+begin_src sas :dir /sshx:host:/path` (remote)
+     - C-RET keybinding functionality
+     - Buffer management and process lifecycle
+   - **Deliverables**: Test reports with pass/fail analysis
 
-#### 3. **euporie-tester Agent** (Validation):
-   - **Scope**: Execute comprehensive testing of implementations
-   - **Focus**: User experience validation, cross-language compatibility
-   - **Deliverables**: Detailed test reports with pass/fail analysis
-   - **Coordinate with**: Main Claude for result evaluation
-
-#### 4. **Main Claude** (Orchestration ONLY):
-   - **Plan features**: Define requirements and acceptance criteria
-   - **Coordinate agents**: Manage test → develop → test cycles
-   - **Evaluate results**: Analyze outcomes and plan iterations
+#### 3. **Main Claude** (Orchestration ONLY):
+   - **Plan features**: Define SAS integration requirements
+   - **Coordinate agents**: Manage develop → test cycles  
+   - **Evaluate results**: Analyze outcomes and plan refinements
    - **User interaction**: Gather feedback and refine requirements
-   - **NEVER directly code**: Always delegate to appropriate agents
+   - **NEVER directly code**: Always delegate to specialized agents
 
-#### **TDD Workflow**:
-1. **Test Writer** → Creates unit tests for specific user workflows
-2. **Developer** → Implements features to pass the tests
-3. **Tester** → Validates implementation and reports results
-4. **Main Claude** → Evaluates and plans next iteration
+#### **SAS Integration Workflow**:
+1. **Developer** → Implements SAS kernel features with TRAMP support
+2. **Tester** → Validates local and remote execution
+3. **Main Claude** → Evaluates results and plans iterations
 
 **Examples**:
-- Test creation: "Use the euporie-integration-test-writer agent to create unit tests for inline graphics display in emacs eat using sixel"
-- Implementation: "Use the euporie-developer agent to implement the features needed to pass the graphics display tests"
-- Validation: "Use the euporie-tester agent to run the full test suite and validate user experience"
+- Implementation: "Use the euporie-developer agent to implement SAS kernel integration with TRAMP remote execution support"  
+- Validation: "Use the euporie-tester agent to test SAS integration with both local and remote execution scenarios"
 
 ### Screenshots and Screen Capture
 
