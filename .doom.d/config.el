@@ -2,62 +2,64 @@
 ;; Place your private configuration here! Remember, you do not need to run 'doom
 ;; sync' after modifying this file!
 
-;; Load required modules for SAS euporie integration
+;;; ================================================================
+;;;                STREAMLINED EUPORIE INTEGRATION ARCHITECTURE
+;;; ================================================================
+;; This section loads the two core modules for unified euporie integration:
+;;   1. tramp-qrsh.el    - Simplified qrsh compute node sessions  
+;;   2. euporie-termint.el - Unified euporie console integration
+;;
+;; All languages (Python, R, Stata, SAS) use IDENTICAL workflows through
+;; universal functions with automatic local/remote routing.
+
 (let ((doom-dir (or (bound-and-true-p doom-user-dir)
                    (expand-file-name "~/.doom.d/"))))
-  ;; Load TRAMP WRDS support first (required by euporie-termint)
-  (load (expand-file-name "tramp-wrds.el" doom-dir))
-  ;; Load termint org-src integration
-  (load (expand-file-name "termint-org-src.el" doom-dir))
-  ;; Load euporie-termint module for native euporie graphics integration
+  ;; Load simplified TRAMP qrsh support first
+  (load (expand-file-name "tramp-qrsh.el" doom-dir))
+  ;; Load unified euporie-termint module  
   (load (expand-file-name "euporie-termint.el" doom-dir)))
-
-;; Ensure euporie-termint-display-console-right function is available
-;; (workaround for loading issues)
-(unless (fboundp 'euporie-termint-display-console-right)
-  (defun euporie-termint-display-console-right (buffer &optional original-buffer original-window)
-    "Display console BUFFER in a right split window."
-    (let ((initial-window (or original-window (selected-window)))
-          (initial-buffer (or original-buffer (current-buffer))))
-      
-      ;; Display buffer in right side window
-      (let ((console-window (display-buffer buffer
-                                            '((display-buffer-reuse-window
-                                               display-buffer-in-side-window)
-                                              (side . right)
-                                              (window-width . 0.5)
-                                              (inhibit-same-window . t)))))
-        
-        (when console-window
-          ;; Scroll to bottom in console
-          (with-selected-window console-window
-            (goto-char (point-max)))
-          
-          ;; Restore focus to original window
-          (when (window-live-p initial-window)
-            (select-window initial-window))
-          
-          (when (buffer-live-p initial-buffer)
-            (set-window-buffer (selected-window) initial-buffer)))))))
 
 ;; Initialize euporie-termint immediately after loading
 (when (and (featurep 'euporie-termint)
            (fboundp 'euporie-termint-setup) 
-           (fboundp 'euporie-termint-setup-keybinding))
+           (fboundp 'euporie-termint-setup-keybindings))
   (euporie-termint-setup)
-  (euporie-termint-setup-keybinding))
+  (euporie-termint-setup-keybindings))
 
-;; Setup euporie-termint integration
+;; Setup euporie-termint integration for org-mode  
 (with-eval-after-load 'org
-  (message "Setting up euporie-termint integration")
+  (message "Setting up unified euporie-termint integration for org-mode")
   (when (featurep 'euporie-termint)
-    (message "euporie-termint functions available: %s"
-             (mapcar (lambda (f) (if (fboundp f) f (format "MISSING-%s" f)))
-                     '(euporie-python-start euporie-r-start euporie-stata-start)))
-    ;; Initialize euporie-termint after confirming it's loaded
-    (when (and (fboundp 'euporie-termint-setup) (fboundp 'euporie-termint-setup-keybinding))
+    (message "euporie-termint unified functions available for all languages")
+    ;; Ensure initialization is complete
+    (when (and (fboundp 'euporie-termint-setup) (fboundp 'euporie-termint-setup-keybindings))
       (euporie-termint-setup)
-      (euporie-termint-setup-keybinding))))
+      (euporie-termint-setup-keybindings))))
+
+;; ================================================================
+;;;                     ESSENTIAL ORG-BABEL CONFIGURATION
+;;; ================================================================
+
+;; Load ob-sas and ob-stata packages - CRITICAL for org-babel functionality
+(use-package! ob-sas
+  :load-path "~/.doom.d/")
+
+(use-package! ob-stata  
+  :load-path "~/.doom.d/")
+
+;; Language mode mappings for kernel detection
+(with-eval-after-load 'org
+  ;; Ensure language aliases are properly set (without extra -mode suffix)
+  (add-to-list 'org-src-lang-modes '("sas" . SAS))
+  (add-to-list 'org-src-lang-modes '("stata" . stata))
+  
+  ;; Org-babel language support
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '((python . t)
+     (R . t)
+     (stata . t)
+     (sas . t))))
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
@@ -98,138 +100,143 @@
 ;; - `add-load-path!' for adding directories to the `load-path', relative to
 ;;   this file. Emacs searches the `load-path' when you load packages with
 ;;   `require' or `use-package'.
-;; - `map!' for binding new keys
-;;
-;; To get information about any of these functions/macros, move the cursor over
-;; the highlighted symbol at press 'K' (non-evil users must press 'C-c g k').
-;; This will open documentation for it, including demos of how they are used.
-;;
-;; You can also try 'gd' (or 'C-c g d') to jump to their definition and see how
-;; they are implemented.
+;; - `add-hook!' for adding functions to hooks
+;; - `quiet!' for suppressing output generated by a call to a function
+;; - `pushnew!' for adding a new element to a list, avoiding duplicates
+;; - `delq!' for deleting elements from lists
+;; - `delete!' for deleting files or directories
+;; - `define-key!' for binding keys
+;; - `undefine-key!' for unbinding keys
 
-;; Enable helm keyboard navigation
-(customize-set-variable 'helm-ff-lynx-style-map t)
+;;; ================================================================
+;;;                    UNIVERSAL TEST FUNCTIONS KEYBINDINGS
+;;; ================================================================
+;; Global keybindings for testing any kernel using universal functions
 
-;; Mixed pitch fonts
-(use-package mixed-pitch
-  :hook
-  (org-roam-mode . mixed-pitch-mode))
+(map! "C-c e t" #'test-euporie-integration  ; Run comprehensive test suite
+      "C-c e l" #'test-local-execution       ; Test any kernel local execution
+      "C-c e r" #'test-remote-execution      ; Test remote execution (SAS)
+      "C-c e w" #'test-window-management     ; Test window management
+      "C-c e k" #'test-keybinding-dispatch   ; Test keybinding dispatch
+      "C-c e g" #'test-graphics-display)     ; Test graphics display
 
-;; eat terminal
-(use-package eat
+;; Accept completion from copilot and fallback to company
+(use-package! copilot
+  :hook (prog-mode . copilot-mode)
+  :bind (:map copilot-completion-map
+              ("<tab>" . 'copilot-accept-completion)
+              ("TAB" . 'copilot-accept-completion)
+              ("C-TAB" . 'copilot-accept-completion-by-word)
+              ("C-<tab>" . 'copilot-accept-completion-by-word)))
+
+;; Load LSP configurations
+(use-package lsp-mode
+  :commands lsp
   :config
-  ;; For `eat-eshell-mode'.
-  (add-hook 'eshell-load-hook #'eat-eshell-mode)
+  (setq lsp-prefer-flymake nil)
+  ;; Increase the amount of data which Emacs reads from the process
+  (setq read-process-output-max (* 1024 1024)) ;; 1mb
+  ;; Increase the amount of data allowed from LSP process
+  (setq lsp-log-io nil)
+  (setq lsp-print-performance nil))
 
-  ;; For `eat-eshell-visual-command-mode'.
-  (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode)
+;; Python LSP setup
+(after! lsp-pyright
+  (setq lsp-pyright-langserver-command "pyright")
+  (setq lsp-pyright-multi-root nil))
 
-  ;; Use eat's native terminal type with graphics support
-  (setq eat-term-name 'eat-term-get-suitable-term-name)
-  
-  ;; Fix whitespace issues in eat terminal
-  (add-hook 'eat-mode-hook
-            (lambda ()
-              ;; Disable whitespace visualization
-              (when (fboundp 'whitespace-mode) (whitespace-mode -1))
-              (setq-local show-trailing-whitespace nil)
-              (setq-local nobreak-char-display nil)))
-
-  ;; Optional keybindings
-  :bind (("C-c t" . eat)
-         ("C-c T" . eat-other-window))
-)
-
-;; vterm terminal configuration
-(after! vterm
-  (add-hook 'vterm-mode-hook
-            (lambda ()
-              ;; Disable whitespace visualization
-              (when (fboundp 'whitespace-mode) (whitespace-mode -1))
-              (setq-local show-trailing-whitespace nil)
-              (setq-local nobreak-char-display nil)))
-  
-  ;; Better integration with TRAMP and remote sessions
-  (setq vterm-max-scrollback 10000)  ; Increase scrollback for long sessions
-  (setq vterm-kill-buffer-on-exit t) ; Clean up buffers when sessions end
-  )
-
-;; Use eat for sixel graphics support (required for euporie inline graphics)
-(setq +term-backend 'eat)
-
-;; Prevent global whitespace mode issues in terminals
-(after! whitespace
-  ;; Ensure whitespace mode doesn't interfere with terminals
-  (setq whitespace-global-modes '(not vterm-mode eat-mode term-mode)))
-
-;; Termint configuration for REPL integration with eat (for sixel graphics)
-(use-package termint
-  :demand t
+;; R LSP setup
+(use-package! ess
   :config
-  ;; Use eat as backend for sixel graphics support
-  (setq termint-backend 'eat))
+  (setq ess-use-flymake nil)
+  (setq ess-use-eldoc 'script-only)
+  (setq ess-R-font-lock-keywords
+        '((ess-R-fl-keyword:modifiers . t)
+          (ess-R-fl-keyword:fun-defs . t)
+          (ess-R-fl-keyword:keywords . t)
+          (ess-R-fl-keyword:assign-ops . t)
+          (ess-R-fl-keyword:constants . t)
+          (ess-fl-keyword:fun-calls . t)
+          (ess-fl-keyword:numbers . t)
+          (ess-fl-keyword:operators . t)
+          (ess-fl-keyword:delimiters . t)
+          (ess-fl-keyword:= . t)
+          (ess-R-fl-keyword:F&T . t))))
 
-;; Include SAS support
-(use-package! ob-sas
-  :load-path "~/.doom.d/"
+;; Stata mode setup
+(use-package! stata-mode
+  :mode "\\.do\\'")
+
+;; SAS mode setup  
+(use-package! ess
   :config
-  ;; Map 'sas' language to SAS-mode for org-src blocks
-  (add-to-list 'org-src-lang-modes '("sas" . SAS)))
+  (require 'ess-sas-l)
+  ;; Create SAS-mode alias for org-babel integration
+  (unless (fboundp 'SAS-mode)
+    (defalias 'SAS-mode 'ess-sas-mode)))
 
-;; Include Stata support
-(use-package! ob-stata
-  :load-path "~/.doom.d/")
-(org-babel-do-load-languages
- 'org-babel-load-languages
- '((sas . t)
-   (R . t)
-   (stata . t)))
+;; Markdown setup
+(after! markdown-mode
+  (setq markdown-command "multimarkdown"))
 
-;; Edit in same window
-;; Doom now treats these buffers as pop-ups
-;; which breaks the default behavior unless you tell it to ignore
+;; Org mode customizations
 (after! org
+  (setq org-directory "~/org/"
+        org-agenda-files (list org-directory)
+        org-default-notes-file (concat org-directory "/notes.org")
+        org-ellipsis " ▼ "
+        org-superstar-headline-bullets-list '("☰" "☱" "☲" "☳" "☴" "☵" "☶" "☷")
+        org-superstar-prettify-item-bullets t
+        org-log-done 'time
+        org-hide-emphasis-markers t
+        org-src-preserve-indentation nil
+        org-src-tab-acts-natively t
+        org-edit-src-content-indentation 0)
+  
+  ;; CRITICAL: Popup rules for org-src buffers - required for org-edit-src-code
   (set-popup-rule! "^\\*Org Src" :ignore t)
-  (set-popup-rule! "^\\*SAS Console" :ignore t))
-(after! vterm
-  (set-popup-rule! "^\\*vterm " :ignore t))
-(setq org-src-window-setup 'current-window)
+  (set-popup-rule! "^\\*SAS Console" :ignore t)
+  
+  ;; Essential org-src window setup - prevents "marker does not point anywhere" error
+  (setq org-src-window-setup 'current-window)
+  
+  ;; Additional essential org-mode settings
+  (setq org-support-shift-select 'always))
 
-;; use tectonic for pdf processing as it is faster
-(setq org-latex-pdf-process
-  '("tectonic %f"))
+;; Projectile setup
+(after! projectile
+  (setq projectile-project-search-path '("~/projects/")
+        projectile-switch-project-action #'projectile-dired))
 
-;; enable org shift select
-(setq org-support-shift-select 'always)
+;; Dired setup
+(after! dired
+  (setq dired-listing-switches "-agho --group-directories-first"
+        dired-omit-files "^\\.[^.].*"
+        dired-omit-verbose nil
+        dired-hide-details-hide-symlink-targets nil
+        delete-by-moving-to-trash t))
 
-;; org hide markers
-(setq org-hide-emphasis-markers t)
+;; Which-key setup
+(after! which-key
+  (setq which-key-idle-delay 0.5
+        which-key-idle-secondary-delay 0.01)
+  (which-key-mode))
 
-;; unfill
-(defun unfill-paragraph (&optional region)
-  "Takes a multi-line paragraph and makes it into a single line of text."
-  (interactive (progn (barf-if-buffer-read-only) '(t)))
-  (let ((fill-column (point-max))
-        ;; This would override `fill-column' if it's an integer.
-        (emacs-lisp-docstring-fill-column t))
-    (fill-paragraph nil region)))
+;; Company mode setup
+(after! company
+  (setq company-idle-delay 0.5
+        company-minimum-prefix-length 2)
+  (setq company-show-numbers t)
+  (add-hook 'evil-normal-state-entry-hook #'company-abort)) ;; make aborting less annoying.
 
-;; need to have exec-path-from-shell in order to get PATH
-(exec-path-from-shell-initialize)
-
-;; Direnv integration for environment management
-(use-package! envrc
+;; Flycheck setup
+(use-package! flycheck
   :config
-  (envrc-global-mode))
+  (setq flycheck-check-syntax-automatically '(save idle-change mode-enabled)
+        flycheck-idle-change-delay 0.8))
 
-;; Function to find jupyter in pixi environment - kept for compatibility
-(defun find-pixi-jupyter ()
-  "Find jupyter executable in current pixi environment."
-  (let* ((default-directory (locate-dominating-file default-directory ".envrc"))
-         (pixi-jupyter (when default-directory
-                        (expand-file-name ".pixi/envs/default/bin/jupyter" default-directory))))
-    (when (and pixi-jupyter (file-executable-p pixi-jupyter))
-      pixi-jupyter)))
-
-;; keybindings
-(load! "bindings")
+;; Git setup
+(after! magit
+  (setq magit-repository-directories '(("~/projects" . 2))
+        magit-save-repository-buffers nil
+        magit-inhibit-save-previous-winconf t))
