@@ -45,7 +45,7 @@
 (require 'ob-ref)
 (require 'ob-comint)
 (require 'ob-eval)
-(eval-when-compile (require 'cl))
+(eval-when-compile (require 'cl-lib))
 
 (declare-function orgtbl-to-csv "org-table" (table params))
 (declare-function sas "ext:ess-sas" (&optional start-args))
@@ -98,27 +98,15 @@
 	      (list body))) "\n")))
 
 (defun org-babel-execute:sas (body params)
-  "Execute a block of sas code.
-This function is called by `org-babel-execute-src-block'."
-  (save-excursion
-    (let* ((result-params (cdr (assoc :result-params params)))
-	   (result-type (cdr (assoc :result-type params)))
-           (session (org-babel-sas-initiate-session
-		     (cdr (assoc :session params)) params))
-	   (colnames-p (cdr (assoc :colnames params)))
-	   (rownames-p (cdr (assoc :rownames params)))
-	   (graphics-file (org-babel-sas-graphical-output-file params))
-	   (full-body (org-babel-expand-body:sas body params graphics-file))
-	   (result
-	    (org-babel-sas-evaluate
-	     session full-body result-type result-params
-	     (or (equal "yes" colnames-p)
-		 (org-babel-pick-name
-		  (cdr (assoc :colname-names params)) colnames-p))
-	     (or (equal "yes" rownames-p)
-		 (org-babel-pick-name
-		  (cdr (assoc :rowname-names params)) rownames-p)))))
-      (if graphics-file nil result))))
+  "Execute a block of SAS code using euporie.
+This function is called by `org-babel-execute-src-block'.
+Supports remote execution via :dir parameter."
+  (let ((dir (cdr (assoc :dir params))))
+    (when (featurep 'euporie-termint)
+      (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
+      (euporie-termint-send-code "sas" body dir))
+    ;; For org-babel, we don't return output as euporie handles display
+    ""))
 
 (defun org-babel-prep-session:sas (session params)
   "Prepare SESSION according to the header arguments specified in PARAMS."
@@ -247,7 +235,7 @@ current code buffer."
 If RESULT-TYPE equals 'output then return standard output as a
 string.  If RESULT-TYPE equals 'value then return the value of the
 last statement in BODY, as elisp."
-  (case result-type
+  (cl-case result-type
     (value
      (let ((tmp-file (org-babel-temp-file "sas-")))
        (org-babel-eval org-babel-sas-command
@@ -269,7 +257,7 @@ last statement in BODY, as elisp."
 If RESULT-TYPE equals 'output then return standard output as a
 string.  If RESULT-TYPE equals 'value then return the value of the
 last statement in BODY, as elisp."
-  (case result-type
+  (cl-case result-type
     (value
      (with-temp-buffer
        (insert (org-babel-chomp body))

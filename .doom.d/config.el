@@ -40,6 +40,9 @@
 ;;;                     ESSENTIAL ORG-BABEL CONFIGURATION
 ;;; ================================================================
 
+;; Load org-syntax-overlay module - WORKING fix for syntax highlighting in Doom Emacs  
+(load! "org-syntax-overlay")
+
 ;; Load ob-sas and ob-stata packages - CRITICAL for org-babel functionality
 (use-package! ob-sas
   :load-path "~/.doom.d/")
@@ -47,19 +50,26 @@
 (use-package! ob-stata  
   :load-path "~/.doom.d/")
 
-;; Language mode mappings for kernel detection
-(with-eval-after-load 'org
-  ;; Ensure language aliases are properly set (without extra -mode suffix)
+;; Language mode mappings and syntax highlighting configuration
+(after! org
+  ;; ESSENTIAL org-src settings - handled by org-syntax-fix module
+  ;; These are kept here for reference but will be overridden by the fix module
+  (setq org-src-fontify-natively t)
+  (setq org-src-preserve-indentation t) 
+  (setq org-src-tab-acts-natively t)
+  
+  ;; Language mode mappings - essential for org-babel integration
+  (add-to-list 'org-src-lang-modes '("python" . python))
+  (add-to-list 'org-src-lang-modes '("R" . r))
   (add-to-list 'org-src-lang-modes '("sas" . SAS))
   (add-to-list 'org-src-lang-modes '("stata" . stata))
   
   ;; Org-babel language support
-  (org-babel-do-load-languages
-   'org-babel-load-languages
-   '((python . t)
-     (R . t)
-     (stata . t)
-     (sas . t))))
+  (setq org-babel-load-languages '((emacs-lisp . t)
+                                   (python . t)
+                                   (R . t)
+                                   (stata . t)
+                                   (sas . t))))
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
@@ -113,21 +123,23 @@
 ;;; ================================================================
 ;; Global keybindings for testing any kernel using universal functions
 
-(map! "C-c e t" #'test-euporie-integration  ; Run comprehensive test suite
+(map! "C-c e t" #'test-euporie-integration    ; Run comprehensive test suite
       "C-c e l" #'test-local-execution       ; Test any kernel local execution
       "C-c e r" #'test-remote-execution      ; Test remote execution (SAS)
       "C-c e w" #'test-window-management     ; Test window management
       "C-c e k" #'test-keybinding-dispatch   ; Test keybinding dispatch
-      "C-c e g" #'test-graphics-display)     ; Test graphics display
+      "C-c e g" #'test-graphics-display      ; Test graphics display
+      "C-c s t" #'org-syntax-overlay-test)     ; Test working syntax highlighting fix
 
 ;; Accept completion from copilot and fallback to company
-(use-package! copilot
-  :hook (prog-mode . copilot-mode)
-  :bind (:map copilot-completion-map
-              ("<tab>" . 'copilot-accept-completion)
-              ("TAB" . 'copilot-accept-completion)
-              ("C-TAB" . 'copilot-accept-completion-by-word)
-              ("C-<tab>" . 'copilot-accept-completion-by-word)))
+;; DISABLED temporarily due to loading issues
+;; (use-package! copilot
+;;   :hook (prog-mode . copilot-mode)
+;;   :bind (:map copilot-completion-map
+;;               ("<tab>" . 'copilot-accept-completion)
+;;               ("TAB" . 'copilot-accept-completion)
+;;               ("C-TAB" . 'copilot-accept-completion-by-word)
+;;               ("C-<tab>" . 'copilot-accept-completion-by-word)))
 
 ;; Load LSP configurations
 (use-package lsp-mode
@@ -179,7 +191,7 @@
 (after! markdown-mode
   (setq markdown-command "multimarkdown"))
 
-;; Org mode customizations
+;; Org mode customizations - consolidated with syntax fix
 (after! org
   (setq org-directory "~/org/"
         org-agenda-files (list org-directory)
@@ -189,8 +201,6 @@
         org-superstar-prettify-item-bullets t
         org-log-done 'time
         org-hide-emphasis-markers t
-        org-src-preserve-indentation nil
-        org-src-tab-acts-natively t
         org-edit-src-content-indentation 0)
   
   ;; CRITICAL: Popup rules for org-src buffers - required for org-edit-src-code
@@ -201,7 +211,11 @@
   (setq org-src-window-setup 'current-window)
   
   ;; Additional essential org-mode settings
-  (setq org-support-shift-select 'always))
+  (setq org-support-shift-select 'always)
+  
+  ;; NOTE: org-src syntax highlighting settings are handled by org-syntax-fix.el
+  ;; to prevent conflicts with Doom's default configuration
+  )
 
 ;; Projectile setup
 (after! projectile
@@ -240,3 +254,7 @@
   (setq magit-repository-directories '(("~/projects" . 2))
         magit-save-repository-buffers nil
         magit-inhibit-save-previous-winconf t))
+
+;; Load org-syntax-overlay for automatic syntax highlighting in org-mode
+;; (already loaded at line 44)
+
