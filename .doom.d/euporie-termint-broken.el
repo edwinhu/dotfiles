@@ -60,16 +60,6 @@ Supported protocols: sixel, kitty, kitty-unicode, iterm."
 
 ;;; Universal Helper Functions
 
-(defun euporie-termint--normalize-buffer-kernel (kernel)
-  "Normalize KERNEL name for buffer naming.
-Maps euporie kernel names back to simple names for consistency."
-  (cond
-   ((or (string= kernel "python3") (string= kernel "python")) "python")
-   ((or (string= kernel "ir") (string= kernel "r")) "r")
-   ((string= kernel "stata") "stata") 
-   ((string= kernel "sas") "sas")
-   (t kernel)))
-
 (defun euporie-termint--check-direnv-allowed (directory)
   "Check if direnv is already allowed for DIRECTORY."
   (when (and (boundp 'envrc-direnv-executable) envrc-direnv-executable)
@@ -101,7 +91,7 @@ Maps euporie kernel names back to simple names for consistency."
   "Detect kernel from org-src buffer language or org-mode code block."
   (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
                                  (match-string 1 (buffer-name))))
-        (lang-from-variable (ignore-errors org-src--lang))
+        (lang-from-variable (bound-and-true-p org-src--lang))
         (lang-from-org-element (when (eq major-mode 'org-mode)
                                  (org-element-property :language (org-element-at-point)))))
     
@@ -109,11 +99,11 @@ Maps euporie kernel names back to simple names for consistency."
       (cond
        ((or (and detected-lang (or (string-equal detected-lang "r") (string-equal detected-lang "R"))) 
             (eq major-mode 'ess-r-mode)) 
-        "ir")  ; R kernel in euporie is "ir"
+        "r")
        ((or (and detected-lang (string-equal detected-lang "python")) 
             (eq major-mode 'python-mode) 
             (eq major-mode 'python-ts-mode)) 
-        "python3")  ; Python kernel in euporie is "python3"
+        "python")
        ((or (and detected-lang (string-equal detected-lang "stata")) 
             (eq major-mode 'stata-mode)) 
         "stata")
@@ -123,12 +113,6 @@ Maps euporie kernel names back to simple names for consistency."
        (t "python")))))
 
 ;;; Universal Window Display Management
-
-(defun euporie-termint-display-console-current-window (buffer)
-  "Display console BUFFER in the current window (for C-' keybinding)."
-  (switch-to-buffer buffer)
-  ;; Scroll to bottom in console
-  (goto-char (point-max)))
 
 (defun euporie-termint-display-console-right (buffer &optional original-buffer original-window)
   "Display console BUFFER in a right split window."
@@ -161,8 +145,7 @@ Maps euporie kernel names back to simple names for consistency."
   "Get or create euporie termint buffer for KERNEL.
 DIR parameter is used for SAS to determine local vs remote execution."
   (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
-         (buffer-kernel (euporie-termint--normalize-buffer-kernel kernel))
-         (buffer-name (format "*euporie-%s*" buffer-kernel))
+         (buffer-name (format "*euporie-%s*" kernel))
          (buffer (get-buffer buffer-name)))
     
     (euporie-termint-debug-log 'info "Getting or creating buffer for %s kernel (remote: %s)" 
@@ -186,23 +169,10 @@ DIR parameter is used for SAS to determine local vs remote execution."
             (sleep-for 0.5)
             (setq wait-count (1+ wait-count)))
           
-          ;; Then wait for kernel to initialize with process check
+          ;; Then wait for kernel to initialize
           (when new-buffer
-            (let ((max-wait-process 15) (wait-count 0) (process nil))
-              ;; Wait for process to be ready
-              (while (and (< wait-count max-wait-process)
-                         (not (setq process (get-buffer-process new-buffer)))
-                         (not (and process (process-live-p process))))
-                (sleep-for 0.5)
-                (setq wait-count (1+ wait-count))
-                (setq process (get-buffer-process new-buffer)))
-              
-              ;; Additional wait for kernel readiness
-              (when process
-                (sleep-for 3)  ; Extra wait for kernel initialization
-                (euporie-termint-debug-log 'info "Kernel process ready after %d attempts" wait-count))
-              (unless process
-                (euporie-termint-debug-log 'warn "Process not ready after waiting"))))
+            (sleep-for 2)  ; Simple initialization wait
+            (euporie-termint-debug-log 'info "Kernel initialization wait complete"))
           new-buffer)))))
 
 ;;; Universal Kernel Startup Functions
@@ -210,8 +180,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
 (defun euporie-termint-start (kernel &optional dir)
   "Universal function to start KERNEL console with optional DIR for remote execution."
   (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
-         (buffer-kernel (euporie-termint--normalize-buffer-kernel kernel))
-         (buffer-name (format "*euporie-%s*" buffer-kernel)))
+         (buffer-name (format "*euporie-%s*" kernel)))
     
     (euporie-termint-debug-log 'info "Starting %s console (remote: %s)" kernel is-remote-sas)
     
@@ -231,43 +200,29 @@ DIR parameter is used for SAS to determine local vs remote execution."
 
 (defun euporie-termint-start-local (kernel)
   "Start local KERNEL console using termint."
-  (let* ((smart-cmd (euporie-termint--build-euporie-command kernel euporie-termint-project-dir))
-         (buffer-kernel (euporie-termint--normalize-buffer-kernel kernel))
-         (default-directory euporie-termint-project-dir))
+  (let ((smart-cmd (euporie-termint--build-euporie-command kernel euporie-termint-project-dir)))
     
     (euporie-termint-debug-log 'info "Local %s command: %s" kernel smart-cmd)
-    (euporie-termint-debug-log 'info "Working directory: %s" default-directory)
-    (when (or (string= kernel "python") (string= kernel "python3"))
-      (euporie-termint-debug-log 'info "Python environment - TERM: %s, NO_COLOR_QUERIES: %s" 
-                                 (cdr (assoc "TERM" process-environment))
-                                 (cdr (assoc "NO_COLOR_QUERIES" process-environment))))
     
     ;; Use cond to handle each kernel type with literal termint names
     (cond
-     ((or (string= kernel "python") (string= kernel "python3"))
-      (condition-case err
-          (progn
-            (termint-define "euporie-python" smart-cmd
-                            :bracketed-paste-p t
-                            :backend 'eat)
-            (euporie-termint-debug-log 'info "Python termint-define completed successfully"))
-        (error 
-         (euporie-termint-debug-log 'error "Failed to define Python termint: %s" err)
-         (error "Python termint-define failed: %s" err)))
-      
+     ((string= kernel "python")
+      (termint-define "euporie-python" smart-cmd
+                      :bracketed-paste-p t
+                      :backend 'eat
+                      :env '(("TERM" . "eat-truecolor")
+                             ("COLORTERM" . "truecolor")
+                             ("EUPORIE_GRAPHICS" . "sixel")))
       (condition-case err
           (progn 
             (termint-euporie-python-start)
-            (let ((buffer (get-buffer (format "*euporie-%s*" buffer-kernel))))
-              (euporie-termint-debug-log 'info "Python start completed, buffer: %s, process: %s" 
-                                         buffer (when buffer (get-buffer-process buffer)))
-              (when buffer
-                (euporie-termint-display-console-right buffer))))
+            (when-let ((buffer (get-buffer "*euporie-python*")))
+              (euporie-termint-display-console-right buffer)))
         (error 
          (euporie-termint-debug-log 'error "Failed to start Python termint: %s" err)
          (message "Warning: Failed to start Python euporie console: %s" err))))
      
-     ((or (string= kernel "r") (string= kernel "ir"))
+     ((string= kernel "r")
       (termint-define "euporie-r" smart-cmd
                       :bracketed-paste-p t
                       :backend 'eat
@@ -277,7 +232,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
       (condition-case err
           (progn 
             (termint-euporie-r-start)
-            (when-let ((buffer (get-buffer (format "*euporie-%s*" buffer-kernel))))
+            (when-let ((buffer (get-buffer "*euporie-r*")))
               (euporie-termint-display-console-right buffer)))
         (error 
          (euporie-termint-debug-log 'error "Failed to start R termint: %s" err)
@@ -295,7 +250,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
       (condition-case err
           (progn 
             (termint-euporie-stata-start)
-            (when-let ((buffer (get-buffer (format "*euporie-%s*" buffer-kernel))))
+            (when-let ((buffer (get-buffer "*euporie-stata*")))
               (euporie-termint-display-console-right buffer)))
         (error 
          (euporie-termint-debug-log 'error "Failed to start Stata termint: %s" err)
@@ -311,7 +266,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
       (condition-case err
           (progn 
             (termint-euporie-sas-start)
-            (when-let ((buffer (get-buffer (format "*euporie-%s*" buffer-kernel))))
+            (when-let ((buffer (get-buffer "*euporie-sas*")))
               (euporie-termint-display-console-right buffer)))
         (error 
          (euporie-termint-debug-log 'error "Failed to start SAS termint: %s" err)
@@ -352,15 +307,14 @@ DIR parameter is used for SAS to determine local vs remote execution."
 
 ;;; Universal Code Sending
 
-(defun euporie-termint-send-code (kernel code &optional dir display-mode)
+(defun euporie-termint-send-code (kernel code &optional dir)
   "Send CODE to euporie console for KERNEL.
-DIR parameter is used for SAS to determine local vs remote execution.
-DISPLAY-MODE can be 'current-window or 'split-right (default)."
+DIR parameter is used for SAS to determine local vs remote execution."
   (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
          (buffer (euporie-termint-get-or-create-buffer kernel dir))
          (send-func (cond
-                    ((or (string= kernel "python") (string= kernel "python3")) #'termint-euporie-python-send-string)
-                    ((or (string= kernel "r") (string= kernel "ir")) #'termint-euporie-r-send-string)
+                    ((string= kernel "python") #'termint-euporie-python-send-string)
+                    ((string= kernel "r") #'termint-euporie-r-send-string)
                     ((string= kernel "stata") #'termint-euporie-stata-send-string)
                     ((and (string= kernel "sas") is-remote-sas) 
                      #'termint-qrsh-session-send-string)  ; Use qrsh-specific send function
@@ -371,15 +325,10 @@ DISPLAY-MODE can be 'current-window or 'split-right (default)."
                                kernel is-remote-sas (substring code 0 (min 50 (length code))))
     
     (when buffer
-      ;; Display console based on display-mode
-      (if (eq display-mode 'current-window)
-          (euporie-termint-display-console-current-window buffer)
-        (euporie-termint-display-console-right buffer))
+      ;; Display console in right window
+      (euporie-termint-display-console-right buffer)
       
       ;; Send code to console with proper targeting
-      (euporie-termint-debug-log 'info "About to send code using %s to buffer %s" send-func (buffer-name buffer))
-      (euporie-termint-debug-log 'info "Buffer process: %s" (get-buffer-process buffer))
-      
       (if is-remote-sas
           ;; For remote SAS, send directly to the buffer
           (progn
@@ -387,13 +336,8 @@ DISPLAY-MODE can be 'current-window or 'split-right (default)."
             (with-current-buffer buffer
               (funcall send-func code)))
         ;; For other kernels, use standard approach
-        (condition-case err
-            (progn
-              (funcall send-func code)
-              (euporie-termint-debug-log 'info "Code sent successfully using %s" send-func))
-          (error 
-           (euporie-termint-debug-log 'error "Send function failed: %s" err)
-           (error "Failed to send code: %s" err))))
+        (progn
+          (funcall send-func code)))
       
       ;; Start file monitoring for Stata graphics if not already running
       (when (string= kernel "stata")
@@ -402,37 +346,17 @@ DISPLAY-MODE can be 'current-window or 'split-right (default)."
       ;; Return buffer for further processing if needed
       buffer)))
 
-;;; Universal Integration Functions
+;;; Universal C-RET Integration Function
 
-(defun euporie-termint-send-region-or-line-current-window ()
-  "Send current region or line to euporie console in current window (C-' keybinding)."
+(defun euporie-termint-send-region-or-line ()
+  "Send current region or line to euporie console with automatic kernel detection."
   (interactive)
-  (euporie-termint--send-region-or-line-internal 'current-window))
-
-(defun euporie-termint-send-region-or-line-split-right ()
-  "Send current region or line to euporie console in right split, keep focus on source (C-RET keybinding)."
-  (interactive)
-  (let ((original-window (selected-window))
-        (original-buffer (current-buffer)))
-    (euporie-termint--send-region-or-line-internal 'split-right)
-    ;; Restore focus to original window for C-RET behavior
-    (when (window-live-p original-window)
-      (select-window original-window))
-    (when (buffer-live-p original-buffer)
-      (set-window-buffer (selected-window) original-buffer))))
-
-(defun euporie-termint--send-region-or-line-internal (&optional display-mode)
-  "Internal function to send current region or line with specified display mode."
   
   (let* ((kernel (euporie-termint-detect-kernel))
-         ;; Detect TRAMP path for remote execution - check org-babel :dir parameter
-         (current-dir (if (and (eq major-mode 'org-mode) (string= kernel "sas"))
-                          ;; For SAS in org-mode, extract :dir from code block
-                          (let ((element (org-element-at-point)))
-                            (when (eq (org-element-type element) 'src-block)
-                              (or (org-element-property :dir element)
-                                  default-directory)))
-                        default-directory))
+         ;; Detect TRAMP path for remote execution (SAS-specific for now)
+         (current-dir (or (and (string= kernel "sas") 
+                              (file-remote-p default-directory))
+                         default-directory))
          (code (cond
                 ((use-region-p)
                  (buffer-substring-no-properties (region-beginning) (region-end)))
@@ -448,29 +372,8 @@ DISPLAY-MODE can be 'current-window or 'split-right (default)."
     (when code
       (euporie-termint-debug-log 'info "Executing %s code via euporie in dir: %s" kernel current-dir)
       (if (and (string= kernel "sas") (file-remote-p current-dir))
-          (euporie-termint-send-code kernel code current-dir display-mode)
-        (euporie-termint-send-code kernel code nil display-mode)))))
-
-;; Backward compatibility - keep the old function name
-(defun euporie-termint-send-region-or-line ()
-  "Send current region or line to euporie console (backward compatibility).
-Defaults to split-right behavior."
-  (interactive)
-  (euporie-termint-send-region-or-line-split-right))
-
-;;; Keybinding Setup
-
-(defun euporie-termint-setup-keybindings ()
-  "Set up keybindings for euporie-termint."
-  ;; C-' for current window display
-  (global-set-key (kbd "C-'") #'euporie-termint-send-region-or-line-current-window)
-  ;; C-RET for split right but keep focus on source
-  (global-set-key (kbd "C-<return>") #'euporie-termint-send-region-or-line-split-right))
-
-(defun euporie-termint-setup ()
-  "Set up euporie-termint integration."
-  ;; No specific setup needed currently, but keeping for future use
-  nil)
+          (euporie-termint-send-code kernel code current-dir)
+        (euporie-termint-send-code kernel code)))))
 
 ;;; Stata Graphics Monitor (Preserve existing functionality)
 
@@ -587,9 +490,9 @@ Supports remote execution via :dir parameter."
   "Test local execution for KERNEL."
   (interactive (list (completing-read "Kernel: " '("python" "r" "stata" "sas"))))
   (let ((test-code (cond
-                    ((string= kernel "python") "print('Hello from Python')\\nprint(f'Kernel: {kernel}')")
-                    ((string= kernel "r") "print('Hello from R')\\ncat('Kernel:', kernel, '\\n')")
-                    ((string= kernel "stata") "display \"Hello from Stata\"\\ndisplay \"Kernel: stata\"")
+                    ((string= kernel "python") "print('Hello from Python')\nprint(f'Kernel: {kernel}')")
+                    ((string= kernel "r") "print('Hello from R')\ncat('Kernel:', kernel, '\n')")
+                    ((string= kernel "stata") "display \"Hello from Stata\"\ndisplay \"Kernel: stata\"")
                     ((string= kernel "sas") "data _null_; put 'Hello from SAS'; put 'Kernel: sas'; run;")
                     (t "# Unknown kernel"))))
     (message "Testing %s local execution..." kernel)
@@ -667,10 +570,10 @@ Supports remote execution via :dir parameter."
   "Test graphics display for KERNEL."
   (interactive (list (completing-read "Kernel: " '("python" "r" "stata" "sas"))))
   (let ((test-code (cond
-                    ((string= kernel "python") "import matplotlib.pyplot as plt\\nimport numpy as np\\nx = np.linspace(0, 10, 100)\\nplt.figure(figsize=(8,5))\\nplt.plot(x, np.sin(x), label='sin(x)')\\nplt.title('Python Graphics Test')\\nplt.legend()\\nplt.show()")
-                    ((string= kernel "r") "x <- seq(0, 10, 0.1)\\nplot(x, sin(x), type='l', main='R Graphics Test', col='blue')")
-                    ((string= kernel "stata") "sysuse auto\\nscatter price mpg, title(\\\"Stata Graphics Test\\\")")
-                    ((string= kernel "sas") "data test; do x = 0 to 10 by 0.1; y = sin(x); output; end; run;\\nproc sgplot data=test; series x=x y=y; title 'SAS Graphics Test'; run;")
+                    ((string= kernel "python") "import matplotlib.pyplot as plt\nimport numpy as np\nx = np.linspace(0, 10, 100)\nplt.figure(figsize=(8,5))\nplt.plot(x, np.sin(x), label='sin(x)')\nplt.title('Python Graphics Test')\nplt.legend()\nplt.show()")
+                    ((string= kernel "r") "x <- seq(0, 10, 0.1)\nplot(x, sin(x), type='l', main='R Graphics Test', col='blue')")
+                    ((string= kernel "stata") "sysuse auto\nscatter price mpg, title(\"Stata Graphics Test\")")
+                    ((string= kernel "sas") "data test; do x = 0 to 10 by 0.1; y = sin(x); output; end; run;\nproc sgplot data=test; series x=x y=y; title 'SAS Graphics Test'; run;")
                     (t "# Graphics not implemented for this kernel"))))
     (message "Testing %s graphics display..." kernel)
     (euporie-termint-debug-log 'info "Running test-graphics-display for kernel: %s" kernel)
@@ -683,7 +586,29 @@ Supports remote execution via :dir parameter."
       (error
        (message "✗ Graphics test failed for %s: %s" kernel err)
        (euporie-termint-debug-log 'error "test-graphics-display failed for %s: %s" kernel err)
-       nil))))
+       nil)))
+
+;;; Setup and Initialization
+
+(defun euporie-termint-setup ()
+  "Set up euporie termint definitions."
+  (message "euporie-termint: Setting up unified euporie console integration")
+  
+  ;; Configure termint backend - use eat for graphics support
+  (setq termint-backend 'eat)
+  
+  ;; Verify euporie is available
+  (let ((euporie-path (or (executable-find "euporie-console")
+                         (when (file-executable-p (expand-file-name "euporie-console" euporie-termint-project-dir))
+                           (expand-file-name "euporie-console" euporie-termint-project-dir)))))
+    
+    (if euporie-path
+        (progn
+          (message "euporie-termint: Found euporie at: %s" euporie-path)
+          (euporie-termint-debug-log 'info "Unified euporie setup completed with path: %s" euporie-path))
+      (progn
+        (message "euporie-termint: WARNING - No euporie-console executable found")
+        (euporie-termint-debug-log 'warn "No euporie-console executable found in PATH or project directory")))))
 
 ;;; Comprehensive Test Suite Function
 
@@ -730,31 +655,38 @@ If KERNEL is provided, test only that kernel. Otherwise, test all supported kern
     (euporie-termint-debug-log 'info "Test suite completed. Results: %s" test-results)
     test-results))
 
-;;; Setup and Initialization
-
-(defun euporie-termint-setup ()
-  "Set up euporie termint definitions."
-  (message "euporie-termint: Setting up unified euporie console integration")
-  
-  ;; Configure termint backend - use eat for graphics support
-  (setq termint-backend 'eat)
-  
-  ;; Verify euporie is available
-  (let ((euporie-path (or (executable-find "euporie-console")
-                         (when (file-executable-p (expand-file-name "euporie-console" euporie-termint-project-dir))
-                           (expand-file-name "euporie-console" euporie-termint-project-dir)))))
-    
-    (if euporie-path
-        (progn
-          (message "euporie-termint: Found euporie at: %s" euporie-path)
-          (euporie-termint-debug-log 'info "Unified euporie setup completed with path: %s" euporie-path))
-      (progn
-        (message "euporie-termint: WARNING - No euporie-console executable found")
-        (euporie-termint-debug-log 'warn "No euporie-console executable found in PATH or project directory")))))
-
 ;; Initialize keybindings when loaded
 (when (featurep 'evil)
   (euporie-termint-setup-keybindings))
+
+;;; Export Functions for External Testing
+
+;;;###autoload
+(defun euporie-termint-universal-send-code (kernel code &optional dir)
+  "Universal function to send CODE to KERNEL with optional remote DIR.
+This is the main entry point for the streamlined architecture."
+  (euporie-termint-send-code kernel code dir))
+
+;;;###autoload  
+(defun euporie-termint-universal-get-buffer (kernel &optional dir)
+  "Universal function to get or create buffer for KERNEL with optional remote DIR."
+  (euporie-termint-get-or-create-buffer kernel dir))
+
+;;;###autoload
+(defun euporie-termint-universal-display (buffer)
+  "Universal function to display console BUFFER in right window."
+  (euporie-termint-display-console-right buffer))
+
+;;;###autoload
+(defun euporie-termint-universal-detect-kernel ()
+  "Universal function to detect current kernel from context."
+  (euporie-termint-detect-kernel))
+
+;;;###autoload
+(defun euporie-termint-universal-send-region-or-line ()
+  "Universal function to send region or line with automatic kernel detection."
+  (interactive)
+  (euporie-termint-send-region-or-line))
 
 (provide 'euporie-termint)
 ;;; euporie-termint.el ends here

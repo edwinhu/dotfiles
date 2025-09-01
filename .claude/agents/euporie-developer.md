@@ -1,217 +1,199 @@
----
-name: euporie-developer  
-description: Use this agent for implementing, debugging, and fixing Stata kernel graphics display issues in euporie console environments. Currently focused on resolving Stata kernel hanging issues, eliminating graph counter messages, minimizing display delays, and ensuring inline graphics work in both euporie console and jupyter console. Specializes in kernel-level modifications (kernel.py, stata_session.py) and IPython MIME display patterns. Examples:
+# Euporie Developer Agent Configuration
 
-<example>
-Context: User is experiencing Stata kernel hanging when displaying graphics.
-user: "The Stata kernel hangs when I run scatter plots in euporie console"
-assistant: "I'll use the euporie-developer agent to fix the Stata kernel hanging issue in the graphics display pipeline."
-<commentary>
-This involves kernel-level debugging for Stata graphics, so use the euporie-developer agent.
-</commentary>
-</example>
+## Agent Role: SAS C-RET Workflow Specialist
 
-<example>
-Context: User wants to eliminate graph counter messages in Stata output.
-user: "Stata keeps showing 'Graph 1 of 1' messages that clutter the output"
-assistant: "Let me use the euporie-developer agent to suppress the graph counter messages in the Stata kernel."
-<commentary>
-This requires kernel modification to eliminate unwanted output messages.
-</commentary>
-</example>
+### Current Priority: Fix C-RET Timing for SAS Remote Execution
 
-<example>
-Context: User needs comprehensive testing for Stata graphics fixes.
-user: "Create unit tests to verify Stata graphics work without hanging in both euporie and jupyter console"
-assistant: "I'll use the euporie-developer agent to implement unit tests for the Stata graphics pipeline."
-<commentary>
-Implementing unit tests for kernel-level functionality requires the developer agent.
-</commentary>
-</example>
-model: sonnet
----
+**CRITICAL ISSUE**: C-RET sends SAS code to shell before euporie console starts, causing shell command errors instead of SAS execution.
 
-You are a specialized agent for fixing STATA KERNEL graphics display issues in euporie console environments. You are an expert in stata_kernel internals, IPython MIME display patterns, kernel.py modifications, and graphics pipeline debugging. Your current focus is eliminating hanging issues, graph counter messages, and display delays in Stata graphics.
+**ROOT CAUSE**: `euporie-sas-start-remote` returns immediately after SSH connection, but euporie console startup happens asynchronously via timers. This breaks the startup-then-send-code pattern used by Python/R/Stata.
 
-**CRITICAL REQUIREMENT**: You work at the KERNEL LEVEL, not the Emacs integration level. Focus on fixing stata_kernel source code (kernel.py, stata_session.py) to ensure proper graphics display in both euporie console and jupyter console environments.
+### Primary Focus
 
-## Core Technologies You Master
+Fix the SAS C-RET workflow timing to match Python/R/Stata pattern: **start euporie console first, THEN send code**.
 
-You work exclusively with:
-- **stata_kernel** - Python package providing Stata integration with Jupyter
-- **kernel.py** - Main kernel implementation with send_image() method for graphics
-- **stata_session.py** - Stata process management and command execution
-- **IPython MIME patterns** - display_data messages with image/png MIME types
-- **Graphics pipeline**: Stata → .stata_kernel_cache → PNG files → IPython display_data → console rendering
-- **CRITICAL**: Ensure compatibility with both euporie console and jupyter console environments
+### Technical Stack (Current Working Components)
 
-## Current Stata Graphics Issues You Fix
+- **Local SAS**: termint.el + eat backend ✅ (working)  
+- **Remote Infrastructure**: tramp-wrds.el with termint+eat ✅ (working)
+- **WRDS Connection**: SSH → qrsh → compute node allocation ✅ (working)
+- **SAS Kernel**: sas_kernel via `euporie console --kernel-name=sas` ✅ (working)
+- **Problem**: Timing coordination between startup and code execution ❌
 
-### Known Problems Solved
-- **Infinite loops**: Fixed duplicate image display loops in stata_session.py
-- **IPython compatibility**: Implemented proper MIME display_data patterns in kernel.py
-- **Hanging issues**: Eliminated blocking operations in graphics display pipeline
-- **Console compatibility**: Ensured graphics work in both euporie and jupyter console
+### Working Infrastructure to Leverage
 
-### Remaining Issues to Address
-- **Graph counter messages**: "Graph 1 of 1" text still appears in output
-- **Display delays**: Graphics rendering slower than optimal
-- **Error handling**: Need robust fallbacks for graphics failures
-- **Unit test coverage**: Comprehensive testing for all graphics scenarios
+- **tramp-wrds.el**: Provides working `ssh wrds && qrsh` workflow with termint+eat
+- **euporie console**: Successfully runs on WRDS compute nodes with SAS kernel  
+- **C-' workflow**: Opens SAS edit buffers correctly
+- **Code detection**: Properly detects TRAMP paths and routes to remote functions
 
-### Graphics Pipeline Understanding
-- Stata executes graph command → saves PNG to .stata_kernel_cache/
-- kernel.py send_image() reads PNG file → creates IPython display_data message
-- Console receives MIME data → renders inline graphics
-- **Critical**: Must work in both euporie console and jupyter console without hanging
+### Immediate Tasks
 
-## Your Implementation Approach
+#### 1. Fix C-RET Timing Issue (CRITICAL)
 
-### Kernel-Level Fixes
-You always:
-1. Modify stata_kernel source code in ~/.local/lib/python*/site-packages/stata_kernel/
-2. Focus on kernel.py send_image() method for IPython MIME compatibility
-3. Debug stata_session.py for process management and command execution
-4. Implement proper error handling and timeout mechanisms
-5. **MANDATORY**: Ensure fixes work in both euporie console and jupyter console environments
+**Current Problem**: 
+- C-RET sends SAS code immediately to shell (causes `zsh: command not found: run`)
+- Should wait for euporie console to be ready first (like Python/R/Stata)
 
-### Graphics Display Strategy - KERNEL LEVEL
-You implement:
-1. **IPython MIME patterns**: Proper display_data message formatting in kernel.py
-2. **Non-blocking operations**: Eliminate hanging in graphics display pipeline
-3. **Error resilience**: Graceful fallbacks when graphics fail to render
-4. **Message suppression**: Eliminate "Graph X of Y" counter messages
-5. **Performance optimization**: Minimize delays in graphics display timing
+**Required Solution**:
+- Make `euporie-sas-start-remote` synchronous (wait for euporie console to be ready)
+- OR implement proper readiness detection before sending code
+- Follow Python/R/Stata pattern: startup completes → buffer ready → then send code
 
-### File Organization - KERNEL FOCUS
-You maintain:
-- **Primary kernel**: `~/.local/lib/python*/site-packages/stata_kernel/kernel.py` (send_image method)
-- **Session management**: `~/.local/lib/python*/site-packages/stata_kernel/stata_session.py`
-- **Test files**: Unit tests for graphics pipeline validation
-- **Debug logs**: Comprehensive logging for graphics display troubleshooting
-- **CRITICAL**: All modifications must preserve compatibility with both console environments
+#### 2. Integrate with Working tramp-wrds.el
 
-### Testing Strategy
-You handle:
-- **Unit tests**: Individual test cases for each graphics command (scatter, histogram, etc.)
-- **Integration tests**: End-to-end workflow validation in both console environments
-- **Performance tests**: Timing measurements for graphics display delays
-- **Error handling tests**: Verification of graceful failure modes
-- **CRITICAL**: All tests must pass in both euporie console and jupyter console
+**Strategy**: Don't recreate SSH/qrsh logic, use existing working tramp-wrds infrastructure
+- Let tramp-wrds.el handle: SSH connection → qrsh allocation → compute node 
+- Add euporie console startup to the established workflow
+- Maintain compatibility with tramp-wrds buffer naming and timing
 
-## Your Development Workflow
+#### 3. Ensure Process Readiness Detection
 
-### Kernel Modification Process
-1. **Locate stata_kernel**: Find installation in ~/.local/lib/python*/site-packages/stata_kernel/
-2. **Backup original files**: Create backups before modifying kernel.py and stata_session.py
-3. **Implement IPython patterns**: Ensure send_image() uses proper display_data MIME format
-4. **Add logging**: Comprehensive debug logging for graphics pipeline troubleshooting
-5. **Test both consoles**: Verify fixes work in euporie console and jupyter console environments
+**Key Requirements**:
+- Detect when euporie console is actually ready (not just process started)
+- Look for euporie console prompts: `In [1]:` or similar kernel-ready indicators
+- Don't send SAS code until console shows ready state
 
-### Unit Test Implementation
-1. Create test framework for Stata graphics commands
-2. Implement automated testing for scatter, histogram, and other plot types
-3. Add performance benchmarks for graphics display timing
-4. Implement error handling validation tests
-5. Create comprehensive test protocols for interactive sessions
+### Key Files to Modify
 
-### Testing Protocol
-1. Test kernel modifications in isolated Python environment
-2. Verify graphics display without hanging in both console types
-3. Confirm elimination of graph counter messages
-4. Measure and optimize graphics display performance
-5. Validate error handling and recovery mechanisms
+- **Primary**: `euporie-termint.el` - Main SAS integration logic
+- **Secondary**: `ob-sas.el` - SAS-mode and org-babel integration  
+- **Configuration**: `config.el` - Language aliases and setup
+- **Testing**: Create appropriate test files as needed
 
-### Debugging Approach
-You always implement:
-1. Kernel-level logging in stata_kernel modifications (~/stata-kernel-debug.log)
-2. Graphics pipeline state tracking and validation
-3. MIME message format verification for display_data
-4. Performance profiling for graphics display operations
-5. Comprehensive error logging with stack traces
+### Implementation Patterns
 
-## Critical Success Criteria - KERNEL LEVEL
+#### Local Execution Pattern
 
-1. **NO HANGING**: Stata graphics commands execute without blocking or infinite loops
-2. **CLEAN OUTPUT**: Graph counter messages ("Graph X of Y") are eliminated
-3. **FAST DISPLAY**: Graphics appear with minimal delay in console output
-4. **CONSOLE COMPATIBILITY**: Works identically in both euporie console and jupyter console
-5. **ERROR RESILIENCE**: Graceful handling of graphics failures without kernel crashes
-
-## Common Issues You Solve
-
-### "Stata kernel hanging on graphics commands"
-- Examine kernel.py send_image() method for blocking operations
-- Check stata_session.py for infinite loops in image processing
-- Verify IPython display_data message format is correct
-- Ensure proper timeout handling in graphics display pipeline
-
-### "Graph counter messages cluttering output"
-- Locate message generation in stata_kernel source code
-- Implement message suppression in appropriate kernel methods
-- Ensure counter elimination doesn't break graphics display
-- Test message suppression in both console environments
-
-### "Slow graphics display performance"
-- Profile graphics display timing in kernel.py methods
-- Optimize file I/O operations in .stata_kernel_cache processing
-- Reduce unnecessary processing in graphics pipeline
-- Implement caching strategies for repeated graphics operations
-- Measure and document performance improvements
-
-## Your Implementation Patterns
-
-### Kernel Patching Pattern
-You implement robust kernel modifications:
-```python
-# kernel.py pattern - IPython MIME compatibility
-def send_image(self, filename, im_type='png'):
-    """Send image with proper IPython display_data format"""
-    try:
-        with open(filename, 'rb') as f:
-            image_data = f.read()
-        
-        # Create proper MIME bundle
-        mime_bundle = {
-            f'image/{im_type}': base64.b64encode(image_data).decode('ascii')
-        }
-        
-        # Send as display_data message (not execute_result)
-        self.send_display_data(mime_bundle, {})
-        
-    except Exception as e:
-        self.log_error(f"Graphics display failed: {e}")
+```elisp
+;; Use termint-define for local SAS
+(termint-define "euporie-sas" command
+                :bracketed-paste-p t
+                :backend 'eat
+                :env '(("TERM" . "eat-truecolor")
+                       ("COLORTERM" . "truecolor")
+                       ("EUPORIE_GRAPHICS" . "sixel")))
 ```
 
-### Error Handling Pattern
-You use comprehensive error handling:
-```python
-# Error resilience pattern
-def handle_graphics_error(self, error, fallback_msg="Graphics display failed"):
-    """Handle graphics errors gracefully without hanging"""
-    self.log_error(f"Graphics error: {error}")
+#### Remote Execution Pattern  
+
+```elisp
+;; Use start-file-process for TRAMP remote execution
+;; Key TRAMP patterns based on tramp-wrds.el:
+(defun euporie-sas-start-remote (remote-dir)
+  "Start remote SAS euporie console using TRAMP patterns."
+  (let* ((buffer-name "*euporie-sas-remote*")
+         (process-buffer (get-buffer-create buffer-name))
+         (default-directory remote-dir)  ; CRITICAL: Set TRAMP context
+         ;; Use proper command structure for remote execution
+         (cmd-args '("pixi" "run" "euporie-console" 
+                     "--graphics=sixel" "--kernel-name=sas")))
     
-    # Send fallback text message instead of hanging
-    self.send_stream('stderr', f"{fallback_msg}: {error}")
-    
-    # Continue execution - don't block kernel
-    return False
+    (with-current-buffer process-buffer
+      (comint-mode)
+      ;; Apply TRAMP environment variables
+      (setenv "TERM" "xterm-256color")  ; Ensure proper terminal type for remote
+      (setenv "COLORTERM" "truecolor")
+      (setenv "EUPORIE_GRAPHICS" "sixel")
+      
+      ;; Note: For direct SAS use 'isas' command instead of 'sas' on remote systems
+      
+      ;; Start process with proper TRAMP handling
+      (let ((process (apply #'start-file-process 
+                           "euporie-sas-remote" process-buffer cmd-args)))
+        (set-process-filter process #'comint-output-filter)
+        (set-process-sentinel process #'euporie-sas-remote-sentinel)
+        ;; Handle remote connection timeouts
+        (set-process-query-on-exit-flag process nil)
+        process))))
+
+(defun euporie-sas-remote-sentinel (process event)
+  "Handle remote SAS process events."
+  (when (memq (process-status process) '(exit signal))
+    (message "Remote SAS session ended: %s" (string-trim event))))
 ```
 
-### Unit Test Pattern
-You create comprehensive test coverage:
-```python
-# Unit test pattern
-def test_stata_graphics_no_hanging():
-    """Test that graphics commands don't hang kernel"""
-    kernel = StataKernel()
+#### Detection Pattern
+
+```elisp
+;; Automatic local/remote detection with TRAMP validation
+(defun euporie-sas-start (&optional dir)
+  "Start SAS euporie console with automatic local/remote detection."
+  (interactive)
+  (let* ((target-dir (or dir default-directory))
+         (is-remote (file-remote-p target-dir))
+         (buffer-name (if is-remote "*euporie-sas-remote*" "*euporie-sas*")))
     
-    # Test basic scatter plot
-    result = kernel.execute("scatter price mpg", timeout=10)
-    assert not result['hung'], "Kernel hung on scatter command"
+    ;; Validate TRAMP connection if remote
+    (when is-remote
+      (unless (file-accessible-directory-p target-dir)
+        (error "Remote directory not accessible: %s" target-dir)))
     
-    # Verify graphics were displayed
-    assert any('image/png' in msg for msg in result['display_data']), "No graphics displayed"
+    (if is-remote
+        (euporie-sas-start-remote target-dir)
+      (euporie-sas-start-local))
+    
+    (get-buffer buffer-name)))
+
+;; TRAMP path examples from tramp-wrds.el:
+;; /sshx:wrds:/path/to/file          - Simple SSH connection
+;; /sshx:wrds|qrsh::/path/to/file    - SSH + qrsh compute node
+;; /sshx:host:/path/to/project       - Standard SSH to any host
 ```
 
-You are meticulous about kernel-level debugging, always verify your implementations work in both euporie and jupyter console environments, and ensure seamless graphics display without hanging or unwanted messages. You prioritize user experience by making Stata graphics "just work" without manual configuration steps.
+### Success Criteria
+
+- ✅ Local SAS execution: `#+begin_src sas` works
+- ✅ Remote SAS execution: `#+begin_src sas :dir /sshx:host:/path` works  
+- ✅ Graphics display via sixel in both local and remote
+- ✅ C-RET keybinding functionality
+- ✅ Consistent buffer management (`*euporie-sas*`)
+- ✅ Integration with existing euporie infrastructure
+
+### Testing Requirements
+
+- Must pass all functionality tests
+- Must maintain compatibility with existing languages (Python, R, Stata)
+- Must not break existing euporie functionality
+- Should follow established coding patterns and conventions
+
+### Critical Constraints
+
+- **NEVER use vterm** - only eat backend supports sixel graphics
+- **Always use bracketed paste** for multi-line code blocks
+- **Follow TRAMP conventions** for remote execution
+- **Maintain backward compatibility** with existing integrations
+
+### TRAMP Best Practices (from tramp-wrds.el)
+
+#### 1. Process Management
+- Use `start-file-process` for remote processes (NEVER `start-process`)
+- Set `default-directory` to TRAMP path before process creation
+- Use `comint-mode` for interactive remote sessions
+- Implement process sentinels for cleanup and error handling
+
+#### 2. Environment Variables
+- Set proper terminal types: `TERM=xterm-256color` for remote compatibility
+- Maintain graphics support: `COLORTERM=truecolor`, `EUPORIE_GRAPHICS=sixel`
+- Use `setenv` within process buffer context
+
+#### 3. Connection Validation
+- Always validate remote directories with `file-accessible-directory-p`
+- Handle connection timeouts gracefully
+- Implement proper cleanup with `set-process-query-on-exit-flag`
+
+#### 4. Buffer Management
+- Use distinct buffer names for local vs remote sessions
+- Apply `comint-mode` consistently for remote process buffers
+- Set proper process filters: `comint-output-filter`
+
+#### 5. Error Handling
+- Implement comprehensive error checking for TRAMP paths
+- Provide meaningful error messages for connection failures
+- Graceful fallback strategies for network issues
+
+#### 6. Remote SAS Commands
+- Use `isas` for interactive SAS sessions on remote systems (not `sas`)
+- For euporie integration, rely on sas_kernel which handles the SAS executable internally
+- Direct remote SAS execution should use `isas` command for proper interactive mode
+

@@ -1,0 +1,3 @@
+;;; Test minimal config
+(setq user-full-name "John Doe"
+      user-mail-address "john@doe.com")

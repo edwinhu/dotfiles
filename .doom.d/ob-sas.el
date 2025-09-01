@@ -386,6 +386,9 @@ This is a minimal implementation to support org-babel editing."
     (delete-horizontal-space)
     (indent-to indent-level)))
 
+;; Create mode aliases - both SAS-mode and sas-mode should work
+(defalias 'sas-mode 'SAS-mode)
+
 ;; Register SAS-mode for .sas files
 (add-to-list 'auto-mode-alist '("\\.sas\\'" . SAS-mode))
 
