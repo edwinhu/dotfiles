@@ -88,114 +88,70 @@ dotfiles/
 #### Current Priority: SAS Remote Execution with TRAMP
 
 **ACTIVE ISSUE**: Complete SAS integration with euporie, org-babel, and remote TRAMP execution.
-**STATUS**: ✅ **COMPLETE** - SAS kernel integration with local/remote execution achieved.
-
-#### Previous Achievement: Stata Inline Graphics Issue Resolution
-
-**RESOLVED ISSUE**: Stata kernel graphics display console cleanliness in euporie environments.
-**STATUS**: ✅ **RESOLVED** - Graph counter messages eliminated, clean console output achieved.
 
 #### Technical Stack
 
-- **Process Management**: 
+- **Process Management**:
   - Local: termint.el with bracketed paste support for multi-line code blocks
-  - Remote: TRAMP-aware process execution with comint for remote directories
+  - Remote: TRAMP-aware process execution with termint for remote directories, and QRSH for compute node hops.
 - **Terminal Backend**: eat (NEVER vterm) - vterm cannot display sixel graphics in Emacs
-- **Graphics Display**: Native euporie graphics display with IPython-compatible MIME display system
-- **Console Modes**: 
-  - Python: `euporie-console --kernel-name=python3`
-  - R: `euporie-console --kernel-name=ir`
-  - Stata: `euporie-console --kernel-name=stata` 
-  - **SAS: `euporie-console --kernel-name=sas` (NEW)**
+- **Console Modes**:
+  - Python: `euporie console --kernel-name=python3`
+  - R: `euporie console --kernel-name=ir`
+  - Stata: `euporie console --kernel-name=stata`
+  - **SAS: `euporie console --kernel-name=sas` (NEW)**
 - **Environment**: TERM=eat-truecolor COLORTERM=truecolor EUPORIE_GRAPHICS=sixel
 - **CRITICAL**: Always use eat backend - vterm will break inline graphics display
-- **TRAMP Support**: Remote execution via `:dir /sshx:host:/path` in org-babel blocks
+- **CRITICAL**: Always use termint and not comint, because comint does not support bracketed paste
+- **TRAMP Support**: Remote execution via `:dir /sshx:host|qrsh::/path` in org-babel blocks
 
-#### SAS Kernel Integration (NEW - COMPLETE)
+#### SAS Kernel Integration (PARTIALLY WORKING - :dir PARAMETER ISSUE)
 
-**Achievement**: Complete SAS integration with local and remote execution capabilities.
+**Implementation Status**:
+✅ **COMPLETED**: Unified buffer approach (*euporie-sas* only, no duplicates)  
+✅ **COMPLETED**: Fixed termint-define macro with eval backtick syntax  
+✅ **COMPLETED**: Remote TRAMP+QRSH connection established successfully  
+❌ **CRITICAL ISSUE**: :dir parameter not passed from org-babel to SAS functions
 
-**Current Architecture**:
-1. **SAS Command** → `proc print data=sashelp.cars; run;` (user input)
-2. **Local Execution** → termint.el + eat backend for `pixi run euporie-console --kernel-name=sas`
-3. **Remote Execution** → TRAMP + comint with `start-file-process` for remote directories
-4. **Graphics Display** → Native euporie sixel graphics display
-5. **Org-babel Integration** → Automatic detection of `:dir` parameter for remote vs local
+**Current Problem**:
+SAS execution defaults to local instead of remote because `dir: nil` is passed to `euporie-sas-start` instead of the TRAMP path `/sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2`.
+
+**Evidence from Debug Logs**:
+```
+[2025-09-02 17:00:56] [INFO] === euporie-sas-start called with dir: nil ===
+[2025-09-02 17:00:56] [DEBUG] SAS start - is-remote: nil, buffer-name: *euporie-sas*
+[2025-09-02 17:00:56] [INFO] Calling euporie-sas-start-local
+```
+
+**Expected Behavior**:
+```
+[INFO] === euporie-sas-start called with dir: /sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2 ===
+[DEBUG] SAS start - is-remote: /qrsh:wrds:, buffer-name: *euporie-sas*
+[INFO] Calling euporie-sas-start-remote
+```
+
+**Root Cause**: :dir parameter extraction from org-babel works correctly, but the parameter is not being passed through the call chain to the SAS startup functions.
 
 **Key Files**:
-- `euporie-termint.el` - Unified SAS integration with TRAMP support
-- `ob-sas.el` - SAS-mode integration and language alias mapping
-- `config.el` - Language mode mapping: "sas" → `SAS-mode`
 
-**TRAMP Remote Execution**:
-- Path detection: `(file-remote-p dir)` for any TRAMP path
-- Process creation: `start-file-process` with `default-directory` set to TRAMP path
-- Communication: `comint-send-string` for remote process interaction
-- Automatic routing: Local uses termint, remote uses TRAMP + comint
+- `euporie-termint.el` - Unified SAS integration with TRAMP support ✅
+- `tramp-qrsh.el` - TRAMP and QRSH support with custom buffer naming ✅  
+- `ob-sas.el` - SAS-mode integration and language alias mapping ✅
+- `config.el` - Language mode mapping: "sas" → `SAS-mode` ✅
 
-#### Stata Kernel Graphics Pipeline (Recently Fixed)
+**TRAMP Remote Execution** (Working when :dir is passed correctly):
 
-**Issue Resolved**: Graph counter messages `global stata_kernel_graph_counter = $stata_kernel_graph_counter + 1` eliminated from console output.
-
-**Current Architecture**:
-1. **Stata Command** → `scatter price mpg` (user input)
-2. **Graph Generation** → PNG files created in `.stata_kernel_cache/`  
-3. **Detection System** → `_check_and_display_graphs()` finds new graphics
-4. **MIME Display** → IPython-compatible `display_data` messages via `_send_euporie_graphics()`
-5. **Console Output** → Clean interface without system messages (like Python/R kernels)
-
-**Files Modified**:
-- `stata_kernel/kernel.py` - IPython MIME compatibility, streamlined graphics detection
-- `stata_kernel/stata_session.py` - Fixed infinite loops, eliminated duplicate displays  
-- `stata_kernel/code_manager.py` - Suppressed counter messages with `quietly` prefix
-- `stata_kernel/graphics.py` - Enhanced environment detection
-
-#### Key Files
-
-- **Primary**: `euporie-termint.el` - Main implementation for Python, R, Stata, and **SAS** euporie integration
-- **SAS Core**: `ob-sas.el` - SAS-mode definition and org-babel integration with TRAMP support
-- **Stata Graphics Core**: Modified `stata_kernel/kernel.py` with IPython-compatible MIME display
-- **Configuration**: `config.el` - Language aliases and kernel integrations
-- **TRAMP Integration**: Remote execution via `file-remote-p` detection and `start-file-process`
-
-#### Implementation Pattern
-
-**SAS Kernel (NEW - COMPLETE)**:
-1. **Local**: `termint-define` with eat backend and bracketed paste enabled
-2. **Remote**: TRAMP-aware `start-file-process` with comint integration
-3. **Command**: `pixi run euporie-console --kernel-name=sas`
-4. **Detection**: Automatic local/remote routing via `(file-remote-p dir)`
-5. **Graphics**: Native euporie sixel display for both local and remote
-6. **Usage**: 
-   - Local: `#+begin_src sas`
-   - Remote: `#+begin_src sas :dir /sshx:wrds:/path`
-7. **Result**: Unified SAS experience with seamless TRAMP integration
-
-**Stata Kernel (Recently Fixed)**:
-1. `termint-define` with eat backend and bracketed paste enabled
-2. `pixi run euporie-console --kernel-name=stata` (clean console output)
-3. Commands: `sysuse auto` → `scatter price mpg` (no counter messages)
-4. Graphics: Automatic inline display via euporie's native protocols
-5. **Result**: Professional console experience matching Python/R kernels
-
-**Python/R Kernels** (Working Reference):
-1. `termint-define` with eat backend and bracketed paste enabled  
-2. `pixi run euporie-console --kernel-name={python3|ir}`
-3. Environment variables: `TERM=eat-truecolor COLORTERM=truecolor`
-4. Native graphics display with automatic protocol detection
+- Path detection: `(file-remote-p dir)` for any TRAMP path ✅
+- Process creation: Custom buffer naming with `tramp-wrds-termint(nil "*euporie-sas*")` ✅
+- Communication: `termint-euporie-sas-send-string` for unified buffer ✅
 
 #### Buffer Management
 
-- **Buffer names**: 
+- **Buffer names**:
   - Local: `*euporie-python*`, `*euporie-r*`, `*euporie-stata*`, `*euporie-sas*`
-  - Remote: `*euporie-sas-remote*` (SAS only - others use local termint)
-- **Process management**: 
-  - Local: termint with eat backend (NEVER vterm)
-  - Remote: TRAMP + comint with `start-file-process`
+  - Remote: `*euporie-sas*`
 - **Display**: Split-window display with automatic plot rendering in same buffer
-- **CRITICAL**: eat backend required for sixel graphics - vterm will not work
-- **SAS-Specific**: Automatic local/remote routing based on `:dir` parameter
-- **Stata-Specific**: Clean console output without graph counter pollution
+- **Remote Routing**: Automatic local/remote routing based on `:dir` parameter
 
 ### Claude Code Integration
 
@@ -204,51 +160,54 @@ dotfiles/
 
 ### Agent Orchestration Protocol - SAS Integration with Euporie
 
-**PROJECT**: SAS kernel integration with euporie, org-babel, and TRAMP remote execution
+**PROJECT**: SAS kernel integration with euporie, org-babel, and TRAMP+QRSH remote execution
 
-**FOCUS**: SAS integration using the same proven stack (eat, termint, sas_kernel, euporie, org-babel) with additional TRAMP remote execution support.
+**FOCUS**: SAS integration using the same proven stack (eat, termint, sas_kernel, euporie, org-babel) with additional TRAMP+QRSH remote execution support.
 
 **CRITICAL**: Main Claude's role is ONLY orchestration and planning. Always delegate to specialized agents:
 
-#### 1. **euporie-developer Agent** (SAS Implementation):
-   - **Scope**: Implement SAS kernel integration features
-   - **Focus**: 
-     - SAS kernel integration with euporie-termint.el
-     - TRAMP remote execution using `file-remote-p` and `start-file-process`
-     - org-babel integration with `:dir` parameter support
-     - SAS-mode integration and language aliases
-   - **Stack**: eat backend, termint (local), comint (remote), sas_kernel, euporie
-   - **Deliverables**: Working SAS integration with local/remote execution
-   - **Files**: `euporie-termint.el`, `ob-sas.el`, `config.el`
+#### 1. **euporie-developer Agent** (SAS Implementation)
 
-#### 2. **euporie-tester Agent** (SAS Validation):
-   - **Scope**: Comprehensive testing of SAS integration
-   - **Focus**: 
-     - Local SAS execution testing
-     - Remote TRAMP execution validation
-     - Graphics display verification (sixel)
-     - org-babel block execution testing
-     - Cross-language compatibility checks
-   - **Test Cases**: 
-     - `#+begin_src sas` (local)
-     - `#+begin_src sas :dir /sshx:host:/path` (remote)
-     - C-RET keybinding functionality
-     - Buffer management and process lifecycle
-   - **Deliverables**: Test reports with pass/fail analysis
+- **Scope**: Implement SAS kernel integration features
+- **Focus**:
+  - SAS kernel integration with euporie-termint.el
+  - TRAMP+QRSH remote execution using `file-remote-p` and `start-file-process`
+  - org-babel integration with `:dir` parameter support
+  - SAS-mode integration and language aliases
+- **Stack**: eat backend, termint, sas_kernel, euporie console
+- **Deliverables**: Working SAS integration with local/remote execution
+- **Files**: `euporie-termint.el`, `ob-sas.el`, `config.el`
 
-#### 3. **Main Claude** (Orchestration ONLY):
-   - **Plan features**: Define SAS integration requirements
-   - **Coordinate agents**: Manage develop → test cycles  
-   - **Evaluate results**: Analyze outcomes and plan refinements
-   - **User interaction**: Gather feedback and refine requirements
-   - **NEVER directly code**: Always delegate to specialized agents
+#### 2. **euporie-tester Agent** (SAS Validation)
 
-#### **SAS Integration Workflow**:
+- **Scope**: Comprehensive testing of SAS integration
+- **Focus**:
+  - Remote TRAMP execution validation
+  - org-babel block execution testing
+  - Cross-language compatibility checks
+- **Test Cases**:
+  - `#+begin_src sas` (local)
+  - `#+begin_src sas :dir /sshx:host|qrsh::/path` (remote)
+  - C-RET keybinding functionality
+  - Buffer management and process lifecycle
+- **Deliverables**: Test reports with pass/fail analysis
+
+#### 3. **Main Claude** (Orchestration ONLY)
+
+- **Plan features**: Define SAS integration requirements
+- **Coordinate agents**: Manage develop → test cycles  
+- **Evaluate results**: Analyze outcomes and plan refinements
+- **User interaction**: Gather feedback and refine requirements
+- **NEVER directly code**: Always delegate to specialized agents
+
+#### **SAS Integration Workflow**
+
 1. **Developer** → Implements SAS kernel features with TRAMP support
 2. **Tester** → Validates local and remote execution
 3. **Main Claude** → Evaluates results and plans iterations
 
 **Examples**:
+
 - Implementation: "Use the euporie-developer agent to implement SAS kernel integration with TRAMP remote execution support"  
 - Validation: "Use the euporie-tester agent to test SAS integration with both local and remote execution scenarios"
 
@@ -270,19 +229,21 @@ dotfiles/
 
 When configuring Emacs/Doom, follow this **mandatory workflow** in order:
 
-### 1. ⚠️ ALWAYS Check for Lisp Errors
+### 1. ⚠️ ALWAYS Check for Lisp Errors AFTER EVERY ELISP FILE MODIFICATION
+
+**MANDATORY**: Check syntax errors IMMEDIATELY after modifying any `.el` file. Missing parentheses will prevent entire modules from loading and cause cryptic errors like "No such language mode: sas-mode".
 
 ```bash
 # Check ALL modified files for syntax errors
 cd ~/.doom.d
 emacs --batch --eval "(progn
-  (dolist (file '(\"config.el\" \"other-file.el\"))
+  (dolist (file '(\"config.el\" \"euporie-termint.el\" \"ob-sas.el\" \"other-file.el\"))
     (condition-case err
-        (progn (check-parens) (message \"✓ %s: syntax OK\" file))
+        (progn (find-file file) (check-parens) (message \"✓ %s: syntax OK\" file))
       (error (message \"✗ %s: %s\" file err)))))"
 ```
 
-**Never skip this step** - syntax errors will break the entire Doom config.
+**CRITICAL REMINDER**: Syntax errors in one file (like `euporie-termint.el`) will prevent other files (like `ob-sas.el`) from loading, causing cascading failures. **Always check syntax BEFORE investigating other issues.**
 
 ### 2. ⚠️ ALWAYS Test Lisp Commands
 
@@ -362,7 +323,50 @@ emacsclient --eval "(progn
 
 **Never ask user to test without running emacsclient tests yourself first**
 
-### 7. ⚠️ ALWAYS Create Commits After Confirmation
+### 7. ⚠️ ALWAYS CHECK LOGS AND ACTUAL BUFFER CONTENT
+
+**MANDATORY**: Before claiming anything works, you MUST verify by checking:
+
+1. **Debug Log Files**: Always check recent entries in debug log files:
+   ```bash
+   tail -20 /Users/vwh7mb/sas-workflow-debug.log
+   tail -20 /Users/vwh7mb/tramp-qrsh-debug.log  
+   tail -20 /Users/vwh7mb/euporie-termint-debug.log
+   ```
+
+2. **Actual Buffer Content**: Check what's actually in the buffers:
+   ```bash
+   emacsclient --eval "(if (get-buffer \"*euporie-sas*\")
+       (with-current-buffer \"*euporie-sas*\"
+         (buffer-substring-no-properties (max 1 (- (point-max) 1000)) (point-max)))
+     \"Buffer not found\")"
+   ```
+
+3. **Process Status**: Verify processes are actually running:
+   ```bash
+   emacsclient --eval "(if (get-buffer \"*euporie-sas*\")
+       (get-buffer-process \"*euporie-sas*\")
+     \"Buffer not found\")"
+   ```
+
+**CRITICAL RULE**: 
+- **NEVER** claim "it works" without checking logs and buffer content
+- **NEVER** assume success based on code changes alone  
+- **ALWAYS** verify actual execution results and error messages
+- **REMEMBER**: User will check logs and will know if you didn't verify
+
+**Example Verification Pattern**:
+```bash
+# 1. Check what actually happened in logs
+tail -10 /Users/vwh7mb/sas-workflow-debug.log
+
+# 2. Check actual buffer content
+emacsclient --eval "(with-current-buffer \"*euporie-sas*\" (buffer-string))"
+
+# 3. Only then conclude if it worked or failed
+```
+
+### 8. ⚠️ ALWAYS Create Commits After Confirmation
 
 - Only create commits when user confirms functionality is working
 - Include comprehensive test results in commit message

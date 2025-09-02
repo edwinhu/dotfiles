@@ -209,7 +209,7 @@ If DIR is provided and is a TRAMP path, start remote SAS session.
 Otherwise start local SAS session."
   (interactive)
   (let* ((is-remote (and dir (file-remote-p dir)))
-         (buffer-name "*euporie-sas*"))
+         (buffer-name (if is-remote "*wrds-qrsh*" "*euporie-sas*")))
     
     (sas-workflow-debug-log 'info "=== euporie-sas-start called with dir: %s ===" (or dir "nil"))
     (sas-workflow-debug-log 'debug "SAS start - is-remote: %s, buffer-name: %s" is-remote buffer-name)
@@ -315,7 +315,7 @@ Otherwise start local SAS session."
   "Get or create euporie termint buffer for KERNEL.
 DIR parameter is used for SAS to determine local vs remote execution."
   (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
-         (buffer-name (format "*euporie-%s*" kernel))
+         (buffer-name (if is-remote-sas "*wrds-qrsh*" (format "*euporie-%s*" kernel)))
          (start-func (cond
                      ((string= kernel "python") #'euporie-python-start)
                      ((string= kernel "r") #'euporie-r-start)
@@ -324,14 +324,29 @@ DIR parameter is used for SAS to determine local vs remote execution."
                      (t (error "Unsupported kernel: %s" kernel))))
          (buffer (get-buffer buffer-name)))
     
-    ;; Check if buffer exists and has live process
-    (if (and buffer 
-             (buffer-live-p buffer)
-             (get-buffer-process buffer)
-             (process-live-p (get-buffer-process buffer)))
-        buffer
-      ;; Need to start new console
-      (progn
+    ;; Check if buffer exists and has live process, and is compatible with execution type
+    (let ((buffer-compatible (and buffer 
+                                  (buffer-live-p buffer)
+                                  (get-buffer-process buffer)
+                                  (process-live-p (get-buffer-process buffer))
+                                  ;; For SAS, check if buffer type matches execution type
+                                  (if (string= kernel "sas")
+                                      ;; TODO: For now, always recreate SAS buffer to ensure compatibility
+                                      ;; In future, could detect buffer execution type more precisely
+                                      nil
+                                    ;; For other kernels, existing buffer is always compatible
+                                    t))))
+      
+      (when (and (string= kernel "sas") buffer (not buffer-compatible))
+        (sas-workflow-debug-log 'info "Killing existing SAS buffer - execution type may have changed")
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer buffer))
+        (setq buffer nil))
+      
+      (if buffer-compatible
+          buffer
+        ;; Need to start new console
+        (progn
         (funcall start-func)
         ;; For remote SAS, use special synchronous handling
         (if is-remote-sas
@@ -353,7 +368,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
               (when buffer
                 (sleep-for 2)  ; Simple 2-second wait instead of complex detection
                 (euporie-termint-debug-log 'info "Kernel initialization wait complete")))
-            (get-buffer buffer-name)))))))
+            (get-buffer buffer-name))))))))
 
 ;;; Language Detection
 
@@ -599,14 +614,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
       ;; For org-babel, we don't return output as euporie handles display
       "")))
 
-(defun org-babel-execute:sas (body params)
-  "Execute SAS BODY with PARAMS using euporie.
-Supports remote execution via :dir parameter."
-  (let ((dir (cdr (assoc :dir params))))
-    (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
-    (euporie-termint-send-code "sas" body dir)
-    ;; For org-babel, we don't return output as euporie handles display
-    ""))
+;; Note: org-babel-execute:sas is defined in ob-sas.el - no duplicate definition needed here
 
 ;;; Buffer keybinding setup helper function
 

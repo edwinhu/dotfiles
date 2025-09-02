@@ -103,7 +103,6 @@ This function is called by `org-babel-execute-src-block'.
 Supports remote execution via :dir parameter."
   (let ((dir (cdr (assoc :dir params))))
     (when (featurep 'euporie-termint)
-      (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
       (euporie-termint-send-code "sas" body dir))
     ;; For org-babel, we don't return output as euporie handles display
     ""))

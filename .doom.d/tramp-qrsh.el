@@ -101,6 +101,132 @@
 
 ;;; Main Session Function
 
+(defun tramp-wrds-termint (&optional queue buffer-name)
+  "Open a termint+eat session on WRDS compute node via qrsh.
+QUEUE can be 'highmem', 'now', or nil for default interactive queue.
+BUFFER-NAME allows custom buffer naming (defaults to *wrds-qrsh*).
+Returns buffer ready for command sending - compatible with SAS remote integration."
+  (interactive)
+  (unless (fboundp 'termint-define)
+    (error "termint is not available. Install termint or use tramp-wrds-shell instead"))
+  (let* ((method (cond
+                  ((equal queue "highmem") "qrshmem")
+                  ((equal queue "now") "qrshnow")
+                  (t "qrsh")))
+         (session-name (format "wrds-%s" method))
+         (final-buffer-name (or buffer-name (format "*%s*" session-name)))
+         (qrsh-command (cond
+                        ((equal queue "highmem") "qrsh -q highmem.q")
+                        ((equal queue "now") "qrsh -now yes -q interactive.q")
+                        (t "qrsh -q interactive.q")))
+         (full-command (format "ssh -t -q wrds %s" qrsh-command)))
+    
+    (tramp-qrsh-debug-log 'info "Starting WRDS termint session with queue: %s, buffer: %s" (or queue "default") final-buffer-name)
+    
+    ;; Kill existing buffer if it exists
+    (when (get-buffer final-buffer-name)
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer final-buffer-name)))
+    
+    (tramp-qrsh-debug-log 'info "Using method %s with command: %s" method full-command)
+    
+    ;; Define termint session with eat backend - use literal session name
+    (cond
+     ((equal method "qrsh")
+      ;; Use custom buffer name if provided, otherwise use default
+      (let ((session-id (if buffer-name
+                            (replace-regexp-in-string "[*]" "" buffer-name)  ; Remove asterisks for session ID
+                          "wrds-qrsh")))
+        (tramp-qrsh-debug-log 'debug "Session ID extracted: '%s' from buffer-name: '%s'" session-id buffer-name)
+        ;; Use eval to pass session-id as literal string to termint-define macro
+        (eval `(termint-define ,session-id ,full-command
+                        :bracketed-paste-p t
+                        :backend 'eat
+                        :env '(("TERM" . "eat-truecolor")
+                               ("COLORTERM" . "truecolor"))))
+        (condition-case err
+            (progn
+              (tramp-qrsh-debug-log 'info "Starting %s session..." session-id)
+              ;; Call the dynamically generated start function
+              (funcall (intern (format "termint-%s-start" session-id)))
+              (sleep-for 4)  ; Allow time for SSH + qrsh connection
+              (let ((buffer (get-buffer final-buffer-name)))
+                (if buffer
+                    (progn
+                      (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
+                      buffer)
+                  (progn
+                    (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
+                    nil))))
+          (error 
+           (tramp-qrsh-debug-log 'error "Failed to start wrds-qrsh session: %s" err)
+           (message "Failed to start wrds-qrsh session: %s" err)
+           nil))))
+     
+     ((equal method "qrshmem")
+      ;; Use custom buffer name if provided, otherwise use default
+      (let ((session-id (if buffer-name
+                            (replace-regexp-in-string "[*]" "" buffer-name)  ; Remove asterisks for session ID
+                          "wrds-qrshmem")))
+        (tramp-qrsh-debug-log 'debug "Session ID extracted: '%s' from buffer-name: '%s'" session-id buffer-name)
+        (eval `(termint-define ,session-id ,full-command
+                        :bracketed-paste-p t
+                        :backend 'eat
+                        :env '(("TERM" . "eat-truecolor")
+                               ("COLORTERM" . "truecolor"))))
+        (condition-case err
+            (progn
+              (tramp-qrsh-debug-log 'info "Starting %s session..." session-id)
+              ;; Call the dynamically generated start function
+              (funcall (intern (format "termint-%s-start" session-id)))
+              (sleep-for 4)  ; Allow time for SSH + qrsh connection
+              (let ((buffer (get-buffer final-buffer-name)))
+                (if buffer
+                    (progn
+                      (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
+                      buffer)
+                  (progn
+                    (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
+                    nil))))
+          (error 
+           (tramp-qrsh-debug-log 'error "Failed to start wrds-qrshmem session: %s" err)
+           (message "Failed to start wrds-qrshmem session: %s" err)
+           nil))))
+     
+     ((equal method "qrshnow")
+      ;; Use custom buffer name if provided, otherwise use default
+      (let ((session-id (if buffer-name
+                            (replace-regexp-in-string "[*]" "" buffer-name)  ; Remove asterisks for session ID
+                          "wrds-qrshnow")))
+        (tramp-qrsh-debug-log 'debug "Session ID extracted: '%s' from buffer-name: '%s'" session-id buffer-name)
+        (eval `(termint-define ,session-id ,full-command
+                        :bracketed-paste-p t
+                        :backend 'eat
+                        :env '(("TERM" . "eat-truecolor")
+                               ("COLORTERM" . "truecolor"))))
+        (condition-case err
+            (progn
+              (tramp-qrsh-debug-log 'info "Starting %s session..." session-id)
+              ;; Call the dynamically generated start function
+              (funcall (intern (format "termint-%s-start" session-id)))
+              (sleep-for 3)  ; Shorter wait for immediate execution
+              (let ((buffer (get-buffer final-buffer-name)))
+                (if buffer
+                    (progn
+                      (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
+                      buffer)
+                  (progn
+                    (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
+                    nil))))
+          (error 
+           (tramp-qrsh-debug-log 'error "Failed to start wrds-qrshnow session: %s" err)
+           (message "Failed to start wrds-qrshnow session: %s" err)
+           nil))))
+     
+     (t 
+      (tramp-qrsh-debug-log 'error "Unknown WRDS method: %s" method)
+      (error "Unknown WRDS method: %s" method)))))
+
 (defun tramp-qrsh-session (&optional queue)
   "Open a termint+eat session on WRDS compute node via qrsh.
 QUEUE can be 'highmem', 'now', or nil for default interactive queue.
