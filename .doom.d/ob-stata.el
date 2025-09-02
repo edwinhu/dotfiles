@@ -112,6 +112,10 @@ This is a minimal implementation to support org-babel editing."
 (add-to-list 'auto-mode-alist '("\\.do\\'" . stata-mode))
 (add-to-list 'auto-mode-alist '("\\.ado\\'" . stata-mode))
 
+;; Map 'stata' language to stata-mode for org-src blocks
+(with-eval-after-load 'org-src
+  (add-to-list 'org-src-lang-modes '("stata" . stata)))
+
 ;; Org babel functions
 (defcustom org-babel-default-header-args:stata
   '((:results . "output") (:session . nil))

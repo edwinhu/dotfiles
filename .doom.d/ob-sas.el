@@ -392,6 +392,10 @@ This is a minimal implementation to support org-babel editing."
 ;; Register SAS-mode for .sas files
 (add-to-list 'auto-mode-alist '("\\.sas\\'" . SAS-mode))
 
+;; Map 'sas' language to SAS-mode for org-src blocks
+(with-eval-after-load 'org-src
+  (add-to-list 'org-src-lang-modes '("sas" . SAS)))
+
 (provide 'ob-sas)
 
 ;;; ob-sas.el ends here
