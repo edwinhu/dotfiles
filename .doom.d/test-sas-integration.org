@@ -1,0 +1,37 @@
+#+TITLE: SAS Integration Test
+#+DATE: 2025-09-02
+#+AUTHOR: Claude Code Testing
+
+* SAS Remote Execution Test
+
+This test will verify that SAS code blocks execute remotely via TRAMP+QRSH and show actual results.
+
+** Test 1: Remote SAS Execution with Cars Data
+
+#+begin_src sas :dir /sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2
+proc print data=sashelp.cars(obs=10);
+   title 'First 10 Cars from SASHELP.CARS Dataset';
+run;
+#+end_src
+
+** Expected Results
+
+- Buffer: =*euporie-sas*= should be created
+- Content: Should show the first 10 rows of the cars dataset
+- Logs: Should show remote TRAMP execution
+- Process: Should connect via QRSH to remote compute node
+
+** Test 2: Simple SAS Summary
+
+#+begin_src sas :dir /sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2
+proc means data=sashelp.cars n mean;
+   var mpg_city mpg_highway;
+   title 'Basic Statistics for MPG Variables';
+run;
+#+end_src
+
+** Debug Information
+
+Check these log files for debugging:
+- ~/euporie-debug.log
+- ~/sas-workflow-debug.log

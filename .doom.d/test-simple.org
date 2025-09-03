@@ -1,0 +1,23 @@
+#+TITLE: Simple Integration Test
+
+* Python Test
+
+#+begin_src python
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 10, 50)
+y = np.sin(x)
+
+plt.figure(figsize=(6, 4))
+plt.plot(x, y, 'b-', linewidth=2)
+plt.title('Simple Test Plot')
+plt.show()
+#+end_src
+
+* SAS Test
+
+#+begin_src sas :dir /sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2
+proc print data=sashelp.cars(obs=5);
+run;
+#+end_src

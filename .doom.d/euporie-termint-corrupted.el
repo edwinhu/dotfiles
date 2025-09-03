@@ -3,12 +3,12 @@
 ;;; Commentary:
 ;; Euporie console integration using termint.el with eat backend for native graphics support
 ;; EUPORIE HANDLES GRAPHICS NATIVELY - no manual conversion needed
-;; Uses euporie console with --graphics=sixel for inline display
+;; Uses euporie-console with --graphics=sixel for inline display
 
 ;;; Code:
 
 (require 'termint nil t)
-(require 'tramp-qrsh nil t)
+(require 'tramp-wrds nil t)
 (require 'org)
 (require 'ob)
 
@@ -44,6 +44,13 @@ Some protocols may work better with stata_kernel than others."
 (defvar sas-workflow-debug-log-file (expand-file-name "sas-workflow-debug.log" "~/")
   "Log file for SAS workflow debugging information.")
 
+(defun sas-workflow-debug-log (level format-string &rest args)
+  "Log LEVEL message with FORMAT-STRING and ARGS to SAS workflow debug file."
+  (let ((message (apply #'format format-string args))
+        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+    (with-temp-buffer
+      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+      (append-to-file (point-min) (point-max) sas-workflow-debug-log-file))))
 
 (defun euporie-termint-debug-log (level format-string &rest args)
   "Log LEVEL message with FORMAT-STRING and ARGS to debug file."
@@ -55,14 +62,32 @@ Some protocols may work better with stata_kernel than others."
 
 ;;; Environment Detection
 
+(defun euporie-termint--check-direnv-allowed (directory)
+  "Check if direnv is already allowed for DIRECTORY."
+  (when (and (boundp 'envrc-direnv-executable) envrc-direnv-executable)
+    (let* ((default-directory directory)
+           (status-output (with-temp-buffer
+                           (when (zerop (call-process envrc-direnv-executable nil t nil "status"))
+                             (buffer-string)))))
+      (and status-output
+           (string-match-p "Found RC allowPath" status-output)))))
 
 (defun euporie-termint--build-euporie-command (kernel project-dir)
-  "Build euporie console command for KERNEL in PROJECT-DIR."
-  (let ((graphics-protocol (if (string= kernel "stata") 
+  "Build euporie-console command for KERNEL in PROJECT-DIR."
+  (let* ((graphics-protocol (if (string= kernel "stata") 
                                euporie-termint-stata-graphics-protocol
-                             euporie-termint-graphics-protocol)))
-    ;; Use euporie directly (no pixi run) for both local and remote to avoid network calls
-    (format "euporie console --graphics=%s --kernel-name=%s" graphics-protocol kernel)))
+                             euporie-termint-graphics-protocol))
+         (base-cmd (format "pixi run euporie-console --graphics=%s --kernel-name=%s" 
+                          graphics-protocol kernel))
+         (is-remote (file-remote-p project-dir)))
+    
+    (if is-remote
+        ;; For remote execution, don't wrap with shell cd - TRAMP handles directory context
+        base-cmd
+      ;; For local execution, use existing logic
+      (if (euporie-termint--check-direnv-allowed project-dir)
+          (format "sh -c 'cd %s && direnv exec . %s'" project-dir base-cmd)
+        (format "sh -c 'cd %s && %s'" project-dir base-cmd)))))
 
 ;;; Kernel Management Functions
 
@@ -80,22 +105,16 @@ Some protocols may work better with stata_kernel than others."
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
     
-    ;; Define termint with proper environment for graphics and working directory
-    (let ((default-directory euporie-termint-project-dir))
-      (termint-define "euporie-python" smart-cmd
-                      :bracketed-paste-p t
-                      :backend 'eat
-                      :env '(("TERM" . "eat-truecolor") 
-                             ("COLORTERM" . "truecolor")
-                             ("EUPORIE_GRAPHICS" . "sixel"))))
+    ;; Define termint with proper environment for graphics
+    (termint-define "euporie-python" smart-cmd
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "eat-truecolor") 
+                           ("COLORTERM" . "truecolor")
+                           ("EUPORIE_GRAPHICS" . "sixel")))
     ;; Start the termint session with error handling
     (condition-case err
-        (progn
-          (let ((default-directory euporie-termint-project-dir))
-            (termint-euporie-python-start))
-          ;; Display in split window using proper console display function
-          (when-let ((buffer (get-buffer "*euporie-python*")))
-            (euporie-termint-display-console-right buffer)))
+        (termint-euporie-python-start)
       (error 
        (euporie-termint-debug-log 'error "Failed to start Python termint: %s" err)
        (message "Warning: Failed to start Python euporie console: %s" err)))
@@ -119,22 +138,16 @@ Some protocols may work better with stata_kernel than others."
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
     
-    ;; Define termint with proper environment for graphics and working directory
-    (let ((default-directory euporie-termint-project-dir))
-      (termint-define "euporie-r" smart-cmd
-                      :bracketed-paste-p t
-                      :backend 'eat
-                      :env '(("TERM" . "eat-truecolor") 
-                             ("COLORTERM" . "truecolor")
-                             ("EUPORIE_GRAPHICS" . "sixel"))))
+    ;; Define termint with proper environment for graphics
+    (termint-define "euporie-r" smart-cmd
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "eat-truecolor") 
+                           ("COLORTERM" . "truecolor")
+                           ("EUPORIE_GRAPHICS" . "sixel")))
     ;; Start the termint session with error handling
     (condition-case err
-        (progn
-          (let ((default-directory euporie-termint-project-dir))
-            (termint-euporie-r-start))
-          ;; Display in split window using proper console display function
-          (when-let ((buffer (get-buffer "*euporie-r*")))
-            (euporie-termint-display-console-right buffer)))
+        (termint-euporie-r-start)
       (error 
        (euporie-termint-debug-log 'error "Failed to start R termint: %s" err)
        (message "Warning: Failed to start R euporie console: %s" err)))
@@ -158,24 +171,18 @@ Some protocols may work better with stata_kernel than others."
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
     
-    ;; Define termint with Stata-specific environment optimizations and working directory
-    (let ((default-directory euporie-termint-project-dir))
-      (termint-define "euporie-stata" smart-cmd
-                      :bracketed-paste-p t
-                      :backend 'eat
-                      :env '(("TERM" . "eat-truecolor")           ; Use eat's native term with graphics support
-                             ("COLORTERM" . "truecolor")
-                             ("EUPORIE_GRAPHICS" . "sixel")       ; Use sixel protocol for consistency
-                             ("LANG" . "en_US.UTF-8")            ; Explicit locale for Unicode
-                             ("LC_ALL" . "en_US.UTF-8"))))       ; Full locale support
+    ;; Define termint with Stata-specific environment optimizations
+    (termint-define "euporie-stata" smart-cmd
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "eat-truecolor")           ; Use eat's native term with graphics support
+                           ("COLORTERM" . "truecolor")
+                           ("EUPORIE_GRAPHICS" . "sixel")       ; Use sixel protocol for consistency
+                           ("LANG" . "en_US.UTF-8")            ; Explicit locale for Unicode
+                           ("LC_ALL" . "en_US.UTF-8")))        ; Full locale support
     ;; Start the termint session with error handling
     (condition-case err
-        (progn
-          (let ((default-directory euporie-termint-project-dir))
-            (termint-euporie-stata-start))
-          ;; Display in split window using proper console display function
-          (when-let ((buffer (get-buffer "*euporie-stata*")))
-            (euporie-termint-display-console-right buffer)))
+        (termint-euporie-stata-start)
       (error 
        (euporie-termint-debug-log 'error "Failed to start Stata termint: %s" err)
        (message "Warning: Failed to start Stata euporie console: %s" err)))
@@ -232,20 +239,18 @@ Otherwise start local SAS session."
     
     (euporie-termint-debug-log 'info "Local SAS command: %s" smart-cmd)
     
-    ;; Define termint for local execution with working directory
-    (let ((default-directory euporie-termint-project-dir))
-      (termint-define "euporie-sas" smart-cmd
-                      :bracketed-paste-p t
-                      :backend 'eat
-                      :env '(("TERM" . "eat-truecolor") 
-                             ("COLORTERM" . "truecolor")
-                             ("EUPORIE_GRAPHICS" . "sixel"))))
+    ;; Define termint for local execution
+    (termint-define "euporie-sas" smart-cmd
+                    :bracketed-paste-p t
+                    :backend 'eat
+                    :env '(("TERM" . "eat-truecolor") 
+                           ("COLORTERM" . "truecolor")
+                           ("EUPORIE_GRAPHICS" . "sixel")))
     
     ;; Start the termint session
     (condition-case err
         (progn 
-          (let ((default-directory euporie-termint-project-dir))
-            (termint-euporie-sas-start))
+          (termint-euporie-sas-start)
           ;; Display in split window using proper console display function
           (when-let ((buffer (get-buffer "*euporie-sas*")))
             (euporie-termint-display-console-right buffer)))
@@ -254,50 +259,43 @@ Otherwise start local SAS session."
        (message "Warning: Failed to start local SAS euporie console: %s" err)))))
 
 (defun euporie-sas-start-remote (remote-dir)
-  "Start remote SAS euporie console by using working tramp-qrsh-with-custom-buffer and then sending euporie command."
+  "Start remote SAS euporie console by using working tramp-wrds-termint and then sending euporie command."
   (let* ((localname (if (file-remote-p remote-dir)
                         (file-remote-p remote-dir 'localname)
                       remote-dir)))
     
     (sas-workflow-debug-log 'info "=== euporie-sas-start-remote called with dir: %s ===" remote-dir)
     (sas-workflow-debug-log 'debug "Remote SAS start - localname extracted: %s" localname)
-    (euporie-termint-debug-log 'info "Remote SAS start - using tramp-qrsh-with-custom-buffer + euporie command for: %s" remote-dir)
+    (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds-termint + euporie command for: %s" remote-dir)
     
-    ;; Use the working tramp-qrsh-with-custom-buffer to get to compute node
-    (sas-workflow-debug-log 'info "Calling tramp-qrsh-with-custom-buffer to establish remote connection with buffer name: *euporie-sas*")
-    (let ((wrds-buffer (tramp-qrsh-with-custom-buffer nil "*euporie-sas*")))
+    ;; Use the working tramp-wrds-termint to get to compute node
+    (sas-workflow-debug-log 'info "Calling tramp-wrds-termint to establish remote connection")
+    (let ((wrds-buffer (tramp-wrds-termint)))
       
       (if wrds-buffer
           (progn
-            (sas-workflow-debug-log 'info "tramp-qrsh-with-custom-buffer returned buffer: %s" (buffer-name wrds-buffer))
+            (sas-workflow-debug-log 'info "tramp-wrds-termint returned buffer: %s" (buffer-name wrds-buffer))
             ;; Keep original buffer name - termint expects this for send functions
             (sas-workflow-debug-log 'debug "Using original buffer name: %s" (buffer-name wrds-buffer)))
-        (sas-workflow-debug-log 'error "tramp-qrsh-with-custom-buffer returned nil - no remote connection established"))
+        (sas-workflow-debug-log 'error "tramp-wrds-termint returned nil - no remote connection established"))
       
       (when wrds-buffer
         
         ;; Send euporie command to the compute node shell with suppressed output
-        (let ((euporie-cmd (format "cd %s 2>/dev/null && exec %s" localname 
-                                  (euporie-termint--build-euporie-command "sas" remote-dir))))
+        (let ((euporie-cmd (format "cd %s 2>/dev/null && export PATH=/home/nyu/eddyhu/env/bin:$PATH >/dev/null 2>&1 && clear && exec euporie console --kernel-name=sas --graphics=sixel" localname)))
           (sas-workflow-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
           (with-current-buffer wrds-buffer
             ;; Use termint send function (not comint)
             (sas-workflow-debug-log 'debug "Sending euporie command to compute node via termint")
-            (if (fboundp 'termint-euporie-sas-send-string)
-                (termint-euporie-sas-send-string euporie-cmd)
-              (error "termint-euporie-sas-send-string not available"))
+            (if (fboundp 'termint-wrds-qrsh-send-string)
+                (termint-wrds-qrsh-send-string euporie-cmd)
+              (error "termint-wrds-qrsh-send-string not available"))
             (sas-workflow-debug-log 'info "Successfully sent euporie command to compute node")
             (euporie-termint-debug-log 'info "Sent euporie command to compute node: %s" euporie-cmd)))
         
         ;; Display in split window using proper console display function
         (sas-workflow-debug-log 'debug "Creating split window layout for remote SAS console")
         (euporie-termint-display-console-right wrds-buffer)
-        
-        ;; Wait for SAS kernel to initialize (same as local SAS)
-        (sas-workflow-debug-log 'info "Waiting for remote SAS kernel to initialize...")
-        (sleep-for 8)  ; Longer wait for remote + SAS kernel startup
-        (sas-workflow-debug-log 'info "Remote SAS kernel initialization wait complete")
-        (euporie-termint-debug-log 'info "Remote SAS kernel initialization wait complete")
         
         (sas-workflow-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
         (euporie-termint-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
@@ -315,37 +313,18 @@ DIR parameter is used for SAS to determine local vs remote execution."
                      ((string= kernel "python") #'euporie-python-start)
                      ((string= kernel "r") #'euporie-r-start)
                      ((string= kernel "stata") #'euporie-stata-start)
-                     ((string= kernel "sas") 
-                      (progn
-                        (euporie-termint-debug-log 'info "Creating SAS start lambda with dir: %s" (or dir "nil"))
-                        (lambda () 
-                          (euporie-termint-debug-log 'info "Lambda called - about to call euporie-sas-start with dir: %s" (or dir "nil"))
-                          (euporie-sas-start dir))))
+                     ((string= kernel "sas") (lambda () (euporie-sas-start dir)))
                      (t (error "Unsupported kernel: %s" kernel))))
          (buffer (get-buffer buffer-name)))
     
-    ;; Check if buffer exists and has live process, and is compatible with execution type
-    (let ((buffer-compatible (and buffer 
-                                  (buffer-live-p buffer)
-                                  (get-buffer-process buffer)
-                                  (process-live-p (get-buffer-process buffer))
-                                  ;; For SAS, check if buffer type matches execution type
-                                  (if (string= kernel "sas")
-                                      ;; Simple reuse: if buffer has live process, it's compatible
-                                      t
-                                    ;; For other kernels, existing buffer is always compatible
-                                    t))))
-      
-      (when (and (string= kernel "sas") buffer (not buffer-compatible))
-        (sas-workflow-debug-log 'info "Killing existing SAS buffer - execution type may have changed")
-        (let ((kill-buffer-query-functions nil))
-          (kill-buffer buffer))
-        (setq buffer nil))
-      
-      (if buffer-compatible
-          buffer
-        ;; Need to start new console
-        (progn
+    ;; Check if buffer exists and has live process
+    (if (and buffer 
+             (buffer-live-p buffer)
+             (get-buffer-process buffer)
+             (process-live-p (get-buffer-process buffer)))
+        buffer
+      ;; Need to start new console
+      (progn
         (funcall start-func)
         ;; For remote SAS, use special synchronous handling
         (if is-remote-sas
@@ -367,7 +346,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
               (when buffer
                 (sleep-for 2)  ; Simple 2-second wait instead of complex detection
                 (euporie-termint-debug-log 'info "Kernel initialization wait complete")))
-            (get-buffer buffer-name))))))))
+            (get-buffer buffer-name))))))
 
 ;;; Language Detection
 
@@ -403,40 +382,25 @@ DIR parameter is used for SAS to determine local vs remote execution."
   (let ((initial-window (or original-window (selected-window)))
         (initial-buffer (or original-buffer (current-buffer))))
     
-    ;; Check if we're in an org-src edit buffer - if so, preserve it on the left
-    (if (and (buffer-live-p initial-buffer)
-             (string-match-p "\\*Org Src.*\\[" (buffer-name initial-buffer)))
-        (progn
-          ;; Org-src context: create explicit split with org-src on left
-          (euporie-termint-debug-log 'info "Org-src context detected - creating split with org-src on left")
-          (delete-other-windows)
-          (set-window-buffer (selected-window) initial-buffer)
-          (let ((right-window (split-window-right)))
-            (with-selected-window right-window
-              (set-window-buffer right-window buffer)
-              (goto-char (point-max)))
-            ;; Stay in org-src buffer (left window)
-            (select-window initial-window)))
+    ;; Display buffer in right side window
+    (let ((console-window (display-buffer buffer
+                                          '((display-buffer-reuse-window
+                                             display-buffer-in-side-window)
+                                            (side . right)
+                                            (window-width . 0.5)
+                                            (inhibit-same-window . t)))))
       
-      ;; Non org-src context: use standard display
-      (let ((console-window (display-buffer buffer
-                                            '((display-buffer-reuse-window
-                                               display-buffer-in-side-window)
-                                              (side . right)
-                                              (window-width . 0.5)
-                                              (inhibit-same-window . t)))))
+      (when console-window
+        ;; Scroll to bottom in console
+        (with-selected-window console-window
+          (goto-char (point-max)))
         
-        (when console-window
-          ;; Scroll to bottom in console
-          (with-selected-window console-window
-            (goto-char (point-max)))
-          
-          ;; Restore focus to original window
-          (when (window-live-p initial-window)
-            (select-window initial-window))
-          
-          (when (buffer-live-p initial-buffer)
-            (set-window-buffer (selected-window) initial-buffer)))))))
+        ;; Restore focus to original window
+        (when (window-live-p initial-window)
+          (select-window initial-window))
+        
+        (when (buffer-live-p initial-buffer)
+          (set-window-buffer (selected-window) initial-buffer))))))
 
 ;;; Graphics File Monitor for Stata
 
@@ -497,6 +461,29 @@ DIR parameter is used for SAS to determine local vs remote execution."
                 (run-with-timer 1 1 #'euporie-termint-check-new-stata-graphs))
           (euporie-termint-debug-log 'info "File monitor started with timer polling (fswatch not available)"))))))
 
+(defun euporie-termint-stata-file-event-handler (process output)
+  "Handle file system events for Stata graphics directory."
+  (when (and output (> (length (string-trim output)) 0))
+    (euporie-termint-check-new-stata-graphs)))
+
+(defun euporie-termint-check-new-stata-graphs ()
+  "Check for new graph files in Stata cache directory and display them."
+  (let* ((cache-dir (expand-file-name "~/.stata_kernel_cache"))
+         (png-files (when (file-directory-p cache-dir)
+                     (directory-files cache-dir t "\\.png$")))
+         (newest-file (when png-files
+                       (car (sort png-files (lambda (a b)
+                                             (time-less-p (nth 5 (file-attributes b))
+                                                         (nth 5 (file-attributes a)))))))))
+    
+    (when (and newest-file
+               (not (string= newest-file euporie-termint-stata-last-graph-file))
+               (get-buffer "*euporie-stata*"))  ; Only if Stata buffer is active
+      
+      (setq euporie-termint-stata-last-graph-file newest-file)
+      (euporie-termint-debug-log 'info "New Stata graph detected: %s" newest-file)
+      ;; Graphics handled by euporie natively - no manual display needed
+      )))
 
 ;;; Code Execution
 
@@ -509,6 +496,8 @@ DIR parameter is used for SAS to determine local vs remote execution."
                     ((string= kernel "python") #'termint-euporie-python-send-string)
                     ((string= kernel "r") #'termint-euporie-r-send-string)
                     ((string= kernel "stata") #'termint-euporie-stata-send-string)
+                    ((and (string= kernel "sas") is-remote-sas) 
+                     #'termint-wrds-qrsh-send-string)  ; Use WRDS-specific send function
                     ((string= kernel "sas") #'termint-euporie-sas-send-string)
                     (t (error "Unsupported kernel: %s" kernel)))))
     
@@ -555,9 +544,10 @@ DIR parameter is used for SAS to determine local vs remote execution."
   (interactive)
   
   (let* ((kernel (euporie-termint-detect-kernel))
-         ;; Extract :dir parameter from current context on-demand
-         (extracted-dir (euporie-termint-extract-dir-from-current-context))
-         (current-dir (or extracted-dir default-directory))
+         ;; Detect TRAMP path for remote execution (SAS-specific for now)
+         (current-dir (or (and (string= kernel "sas") 
+                              (file-remote-p default-directory))
+                         default-directory))
          (code (cond
                 ((use-region-p)
                  (buffer-substring-no-properties (region-beginning) (region-end)))
@@ -580,111 +570,36 @@ DIR parameter is used for SAS to determine local vs remote execution."
 
 (defun org-babel-execute:python (body params)
   "Execute Python BODY with PARAMS using euporie."
-  (let ((dir (cdr (assoc :dir params))))
-    (let ((buffer (euporie-termint-get-or-create-buffer "python")))
-      (when buffer
-        (euporie-termint-send-code "python" body dir)
-        ;; For org-babel, we don't return output as euporie handles display
-        ""))))
+  (let ((buffer (euporie-termint-get-or-create-buffer "python")))
+    (when buffer
+      (euporie-termint-send-code "python" body)
+      ;; For org-babel, we don't return output as euporie handles display
+      "")))
 
 (defun org-babel-execute:R (body params)
   "Execute R BODY with PARAMS using euporie."
-  (let ((dir (cdr (assoc :dir params))))
-    (let ((buffer (euporie-termint-get-or-create-buffer "r")))
-      (when buffer
-        (euporie-termint-send-code "r" body dir)
-        ;; For org-babel, we don't return output as euporie handles display
-        ""))))
+  (let ((buffer (euporie-termint-get-or-create-buffer "r")))
+    (when buffer
+      (euporie-termint-send-code "r" body)
+      ;; For org-babel, we don't return output as euporie handles display
+      "")))
 
 (defun org-babel-execute:stata (body params)
   "Execute Stata BODY with PARAMS using euporie."
-  (let ((dir (cdr (assoc :dir params))))
-    (let ((buffer (euporie-termint-get-or-create-buffer "stata")))
-      (when buffer
-        (euporie-termint-send-code "stata" body dir)
-        ;; For org-babel, we don't return output as euporie handles display
-        ""))))
+  (let ((buffer (euporie-termint-get-or-create-buffer "stata")))
+    (when buffer
+      (euporie-termint-send-code "stata" body)
+      ;; For org-babel, we don't return output as euporie handles display
+      "")))
 
 (defun org-babel-execute:sas (body params)
   "Execute SAS BODY with PARAMS using euporie.
 Supports remote execution via :dir parameter."
   (let ((dir (cdr (assoc :dir params))))
-    (euporie-termint-debug-log 'debug "=== org-babel-execute:sas ENTRY ===")
-    (euporie-termint-debug-log 'debug "  params: %s" params)
-    (euporie-termint-debug-log 'debug "  extracted dir: %s" dir)
-    (euporie-termint-debug-log 'debug "  dir type: %s" (type-of dir))
     (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
-    
     (euporie-termint-send-code "sas" body dir)
     ;; For org-babel, we don't return output as euporie handles display
     ""))
-
-;;; Hook Functions
-
-(defun euporie-termint-extract-dir-from-current-context ()
-  "Extract :dir parameter from current org-src context using multiple strategies."
-  (euporie-termint-debug-log 'debug "=== Extracting :dir from current context ===")
-  (euporie-termint-debug-log 'debug "Buffer name: %s" (buffer-name))
-  
-  (let ((extracted-dir nil))
-    
-    ;; Strategy 1: Try org-src markers if available and valid
-    (when (and (string-match "\\*Org Src.*\\[" (buffer-name))
-               (boundp 'org-src--beg-marker) 
-               org-src--beg-marker)
-      (euporie-termint-debug-log 'debug "Strategy 1: Trying org-src markers")
-      (euporie-termint-debug-log 'debug "  Marker: %s" org-src--beg-marker)
-      (euporie-termint-debug-log 'debug "  Marker buffer: %s" (marker-buffer org-src--beg-marker))
-      
-      (when (and (markerp org-src--beg-marker)
-                 (marker-buffer org-src--beg-marker)
-                 (buffer-live-p (marker-buffer org-src--beg-marker))
-                 (marker-position org-src--beg-marker))
-        (condition-case err
-            (with-current-buffer (marker-buffer org-src--beg-marker)
-              (save-excursion
-                (goto-char (marker-position org-src--beg-marker))
-                (let* ((element (org-element-at-point))
-                       (params (org-babel-parse-header-arguments
-                               (or (org-element-property :parameters element) "")))
-                       (dir (cdr (assoc :dir params))))
-                  (euporie-termint-debug-log 'debug "  Strategy 1 - Element: %s" element)
-                  (euporie-termint-debug-log 'debug "  Strategy 1 - Parsed params: %s" params)
-                  (euporie-termint-debug-log 'debug "  Strategy 1 - Extracted dir: %s" dir)
-                  (setq extracted-dir dir))))
-          (error 
-           (euporie-termint-debug-log 'debug "  Strategy 1 failed: %s" err)))))
-    
-    ;; Strategy 2: Search for org buffers with matching src block if Strategy 1 failed
-    (when (and (not extracted-dir)
-               (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name)))
-      (euporie-termint-debug-log 'debug "Strategy 2: Searching org buffers for matching src block")
-      (let ((lang (match-string 1 (buffer-name)))
-            (src-content (buffer-substring-no-properties (point-min) (min 100 (point-max)))))
-        (euporie-termint-debug-log 'debug "  Looking for language: %s" lang)
-        (euporie-termint-debug-log 'debug "  Content snippet: %s" (substring src-content 0 (min 50 (length src-content))))
-        
-        (dolist (buffer (buffer-list))
-          (when (and (not extracted-dir)
-                     (with-current-buffer buffer (eq major-mode 'org-mode)))
-            (condition-case err
-                (with-current-buffer buffer
-                  (save-excursion
-                    (goto-char (point-min))
-                    ;; Search for src blocks with :dir parameter
-                    (while (and (not extracted-dir)
-                                (re-search-forward (format "^[ \t]*#\\+begin_src[ \t]+%s\\>.*:dir[ \t]+\\([^ \t\n]+\\)" lang) nil t))
-                      (let ((found-dir (match-string 1)))
-                        (euporie-termint-debug-log 'debug "  Strategy 2 - Found :dir in buffer %s: %s" (buffer-name buffer) found-dir)
-                        (setq extracted-dir found-dir)))))
-              (error 
-               (euporie-termint-debug-log 'debug "  Strategy 2 - Error in buffer %s: %s" (buffer-name buffer) err)))))))
-    
-    (if extracted-dir
-        (euporie-termint-debug-log 'info "✓ Successfully extracted :dir: %s" extracted-dir)
-      (euporie-termint-debug-log 'debug "No :dir parameter found, using default directory"))
-    
-    extracted-dir))
 
 ;;; Buffer keybinding setup helper function
 
@@ -728,17 +643,17 @@ Supports remote execution via :dir parameter."
   (setq termint-backend 'eat)
   
   ;; Verify euporie is available
-  (let ((euporie-path (or (executable-find "euporie")
-                         (when (file-executable-p (expand-file-name "euporie" euporie-termint-project-dir))
-                           (expand-file-name "euporie" euporie-termint-project-dir)))))
+  (let ((euporie-path (or (executable-find "euporie-console")
+                         (when (file-executable-p (expand-file-name "euporie-console" euporie-termint-project-dir))
+                           (expand-file-name "euporie-console" euporie-termint-project-dir)))))
     
     (if euporie-path
         (progn
           (message "euporie-termint: Found euporie at: %s" euporie-path)
           (euporie-termint-debug-log 'info "Euporie setup completed with path: %s" euporie-path))
       (progn
-        (message "euporie-termint: WARNING - No euporie executable found")
-        (euporie-termint-debug-log 'warn "No euporie executable found in PATH or project directory")))))
+        (message "euporie-termint: WARNING - No euporie-console executable found")
+        (euporie-termint-debug-log 'warn "No euporie-console executable found in PATH or project directory"))))))
 
 ;;; Initialization
 
