@@ -301,10 +301,33 @@ Otherwise start local SAS session."
         (sas-workflow-debug-log 'debug "Creating split window layout for remote SAS console")
         (euporie-termint-display-console-right wrds-buffer)
         
-        ;; Wait for SAS kernel to initialize (longer wait for terminal readiness)
+        ;; Wait for SAS kernel to initialize with smart polling
         (sas-workflow-debug-log 'info "Waiting for remote SAS kernel to initialize...")
-        (sleep-for 12)  ; Extended wait for remote + SAS kernel startup + terminal readiness
-        (sas-workflow-debug-log 'info "Remote SAS kernel initialization wait complete")
+        (let ((wait-count 0)
+              (max-wait 6)  ; 6 * 2 = 12 seconds max
+              (ready nil))
+          (while (and (< wait-count max-wait) (not ready))
+            (sleep-for 2)
+            (setq wait-count (1+ wait-count))
+            (sas-workflow-debug-log 'debug "Polling for SAS readiness - attempt %d/%d" wait-count max-wait)
+            ;; Check buffer content for SAS readiness indicators
+            (when (and (>= wait-count 2)  ; Minimum 4 seconds before checking
+                       (buffer-live-p wrds-buffer))
+              (with-current-buffer wrds-buffer
+                (let ((buffer-content (buffer-substring-no-properties (max 1 (- (point-max) 500)) (point-max))))
+                  (sas-workflow-debug-log 'debug "Checking buffer content for readiness indicators")
+                  ;; Look for SAS/Jupyter prompt indicators
+                  (when (or (string-match-p "In \\[[0-9]*\\]:" buffer-content)
+                            (string-match-p "SAS Connection established" buffer-content)
+                            (string-match-p "> $" buffer-content))
+                    (sas-workflow-debug-log 'debug "Found SAS readiness indicator in buffer content")
+                    (setq ready t))))
+            ;; Fallback: if no readiness indicator after minimum time, assume ready
+            (when (>= wait-count 3)  ; Fallback after 6 seconds
+              (setq ready t)))
+          (if ready
+              (sas-workflow-debug-log 'info "SAS kernel ready after %d polls (%d seconds)" wait-count (* wait-count 2))
+            (sas-workflow-debug-log 'warn "SAS kernel readiness timeout after %d seconds" (* wait-count 2))))
         (euporie-termint-debug-log 'info "Remote SAS kernel initialization wait complete")
         
         (sas-workflow-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
