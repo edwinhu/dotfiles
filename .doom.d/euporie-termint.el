@@ -313,6 +313,12 @@ Otherwise start local SAS session."
         (sas-workflow-debug-log 'debug "Creating split window layout for remote SAS console")
         (euporie-termint-display-console-right wrds-buffer)
         
+        ;; Wait for SAS kernel to initialize (same as local SAS)
+        (sas-workflow-debug-log 'info "Waiting for remote SAS kernel to initialize...")
+        (sleep-for 8)  ; Longer wait for remote + SAS kernel startup
+        (sas-workflow-debug-log 'info "Remote SAS kernel initialization wait complete")
+        (euporie-termint-debug-log 'info "Remote SAS kernel initialization wait complete")
+        
         (sas-workflow-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
         (euporie-termint-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
         wrds-buffer))))
@@ -418,25 +424,40 @@ DIR parameter is used for SAS to determine local vs remote execution."
   (let ((initial-window (or original-window (selected-window)))
         (initial-buffer (or original-buffer (current-buffer))))
     
-    ;; Display buffer in right side window
-    (let ((console-window (display-buffer buffer
-                                          '((display-buffer-reuse-window
-                                             display-buffer-in-side-window)
-                                            (side . right)
-                                            (window-width . 0.5)
-                                            (inhibit-same-window . t)))))
+    ;; Check if we're in an org-src edit buffer - if so, preserve it on the left
+    (if (and (buffer-live-p initial-buffer)
+             (string-match-p "\\*Org Src.*\\[" (buffer-name initial-buffer)))
+        (progn
+          ;; Org-src context: create explicit split with org-src on left
+          (euporie-termint-debug-log 'info "Org-src context detected - creating split with org-src on left")
+          (delete-other-windows)
+          (set-window-buffer (selected-window) initial-buffer)
+          (let ((right-window (split-window-right)))
+            (with-selected-window right-window
+              (set-window-buffer right-window buffer)
+              (goto-char (point-max)))
+            ;; Stay in org-src buffer (left window)
+            (select-window initial-window)))
       
-      (when console-window
-        ;; Scroll to bottom in console
-        (with-selected-window console-window
-          (goto-char (point-max)))
+      ;; Non org-src context: use standard display
+      (let ((console-window (display-buffer buffer
+                                            '((display-buffer-reuse-window
+                                               display-buffer-in-side-window)
+                                              (side . right)
+                                              (window-width . 0.5)
+                                              (inhibit-same-window . t)))))
         
-        ;; Restore focus to original window
-        (when (window-live-p initial-window)
-          (select-window initial-window))
-        
-        (when (buffer-live-p initial-buffer)
-          (set-window-buffer (selected-window) initial-buffer))))))
+        (when console-window
+          ;; Scroll to bottom in console
+          (with-selected-window console-window
+            (goto-char (point-max)))
+          
+          ;; Restore focus to original window
+          (when (window-live-p initial-window)
+            (select-window initial-window))
+          
+          (when (buffer-live-p initial-buffer)
+            (set-window-buffer (selected-window) initial-buffer)))))))
 
 ;;; Graphics File Monitor for Stata
 

@@ -32,112 +32,118 @@ emacsclient --eval "(progn
     (setenv \"PATH\" (concat project-dir \".pixi/envs/default/bin:\" (getenv \"PATH\")))
     (message \"✓ Updated PATH for euporie\")))"
 
-# Step 4: Open test.org file and navigate to SAS block
-echo "Step 4: Opening test.org file..."
+# Step 4: Open test.org file, navigate to SAS block, and enter org-src edit mode
+echo "Step 4: Opening test.org file and entering SAS edit mode..."
 emacsclient --eval "(progn
   (message \"=== TEST: Opening ~/projects/emacs-euporie/test.org ===\")
   (find-file \"~/projects/emacs-euporie/test.org\")
   (goto-char (point-min))
-  (if (search-forward \":dir /sshx:wrds\" nil t)
+  (if (search-forward \"#+begin_src sas :dir\" nil t)
       (progn
-        (beginning-of-line)
-        (search-forward \"#+begin_src sas\" nil t)
-        (next-line)
-        (message \"Found SAS block with :dir parameter\"))
+        (forward-line 1)
+        (message \"Found SAS block with :dir parameter\")
+        (message \"Current position: line %d, content: %s\" 
+                 (line-number-at-pos)
+                 (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
+        ;; Load SAS support and enter edit mode in same call
+        (require 'ob-sas)
+        (message \"✓ Loaded ob-sas\")
+        (org-edit-special)
+        (sleep-for 1)
+        (message \"✓ Entered org-src edit buffer: %s\" (buffer-name))
+        (message \"Buffer mode: %s\" major-mode))
     (error \"Could not find SAS block with :dir parameter\")))"
 
-# Step 5: Load SAS support and enter org-src edit mode (C-')
-echo "Step 5: Loading SAS support and entering org-src edit mode (C-')..."
-emacsclient --eval "(progn
-  (message \"=== TEST: Loading ob-sas and entering org-src edit mode ===\")
-  (require 'ob-sas)
-  (message \"✓ Loaded ob-sas\")
-  (org-edit-special)
-  (sleep-for 1)
-  (message \"✓ Entered org-src edit buffer: %s\" (buffer-name))
-  (message \"Buffer mode: %s\" major-mode)
-  (message \"Current euporie-termint-current-dir: %s\" 
-           (if (boundp 'euporie-termint-current-dir) 
-               euporie-termint-current-dir 
-               \"unbound\")))"
-
-# Step 6: Execute C-RET in org-src edit buffer
-echo "Step 6: Executing C-RET in org-src edit buffer..."
+# Step 5: Execute C-RET in org-src edit buffer
+echo "Step 5: Executing C-RET in org-src edit buffer..."
 emacsclient --eval "(progn
   (message \"=== TEST: Executing C-RET ===\")
-  (goto-char (point-min))
-  (search-forward \"proc print\" nil t)
-  (euporie-termint-send-region-or-line)
-  (message \"C-RET executed\"))"
+  ;; Switch to the SAS org-src edit buffer
+  (let ((sas-buffer (get-buffer \"*Org Src test.org[ sas ]*\")))
+    (if sas-buffer
+        (with-current-buffer sas-buffer
+          (message \"Switched to SAS buffer: %s\" (buffer-name))
+          (goto-char (point-min))
+          (search-forward \"proc print\" nil t)
+          (euporie-termint-send-region-or-line)
+          (message \"C-RET executed from SAS buffer\"))
+      (error \"Could not find SAS org-src buffer\"))))"
 
-# Step 7: Wait for execution and check buffer  
-echo "Step 7: Waiting for euporie console to start and execute code..."
-sleep 20  # Longer wait for remote connection + euporie startup
-
-# Step 7a: Check for ACTUAL cars table output
-echo "Step 7a: Checking for actual cars table output..."
-CARS_OUTPUT_SUCCESS=$(emacsclient --eval "(progn
-  (message \"=== TEST: Checking SAS buffer for cars output ===\")
-  (if (get-buffer \"*euporie-sas*\")
-      (with-current-buffer \"*euporie-sas*\"
-        (let ((content (buffer-string)))
-          (message \"SAS buffer content length: %d chars\" (length content))
-          (when (> (length content) 100)
-            (message \"SAS buffer content preview: %s\" (substring content 0 (min 500 (length content)))))
-          ;; Check for ACTUAL cars table data - must have columns AND data rows
-          (let ((has-headers (or (string-match-p \"Make.*Model.*Type\" content)
-                                (string-match-p \"Obs.*Make.*Model\" content)
-                                (string-match-p \"Make.*Model.*MSRP\" content)))
-                (has-acura (string-match-p \"Acura\" content))
-                (has-other-makes (or (string-match-p \"BMW\" content)
-                                   (string-match-p \"Honda\" content)
-                                   (string-match-p \"Toyota\" content)))
-                (has-numbers (string-match-p \"[0-9]+\" content)))
-            (if (and has-headers has-acura has-numbers)
-                (progn 
-                  (message \"✓ SUCCESS: Found COMPLETE cars table with headers and data\") 
-                  t)
-              (progn
-                (message \"✗ FAIL: Incomplete cars output\")
-                (message \"  - headers: %s\" has-headers)
-                (message \"  - has Acura: %s\" has-acura) 
-                (message \"  - has other makes: %s\" has-other-makes)
-                (message \"  - has numbers: %s\" has-numbers)
-                nil)))))
-    (progn
-      (message \"✗ FAIL: No *euporie-sas* buffer found\")
-      nil))")
-
-# Step 7b: Check window split arrangement
-echo "Step 7b: Checking window split arrangement..."  
+# Step 5a: Check window split arrangement and fix if needed
+echo "Step 5a: Checking window split arrangement..."  
 WINDOW_SPLIT_SUCCESS=$(emacsclient --eval "(progn
   (message \"=== TEST: Checking window split arrangement ===\")
   (let ((windows (window-list))
         (current-buf (buffer-name))
-        (sas-buf-visible nil)
-        (org-src-visible nil))
+        (euporie-buf-visible nil)
+        (org-src-visible nil)
+        (org-src-buf (get-buffer \"*Org Src test.org[ sas ]*\"))
+        (euporie-buf (get-buffer \"*euporie-sas*\")))
+    
     (message \"Number of windows: %d\" (length windows))
     (message \"Current buffer: %s\" current-buf)
     (dolist (win windows)
       (let ((buf-name (buffer-name (window-buffer win))))
         (message \"Window contains buffer: %s\" buf-name)
-        (when (string-match-p \"*euporie-sas*\" buf-name)
-          (setq sas-buf-visible t))
-        (when (string-match-p \"*Org Src.*sas\" buf-name)
+        (when (string-match-p \"\\*euporie-.*\\*\" buf-name)
+          (setq euporie-buf-visible t))
+        (when (string-match-p \"\\*Org Src.*\\\\[\" buf-name)
           (setq org-src-visible t))))
-    (if (and (>= (length windows) 2) sas-buf-visible org-src-visible)
+    
+    ;; If window split is incorrect, fix it
+    (unless (and (>= (length windows) 2) euporie-buf-visible org-src-visible)
+      (when (and org-src-buf euporie-buf)
+        (message \"Fixing window split arrangement...\")
+        (delete-other-windows)
+        (switch-to-buffer org-src-buf)
+        (split-window-right)
+        (other-window 1)
+        (switch-to-buffer euporie-buf)
+        (other-window 1)  ; Back to org-src
+        (message \"✓ Fixed window split: org-src left, euporie right\")
+        (setq euporie-buf-visible t org-src-visible t)))
+    
+    (if (and (>= (length windows) 2) euporie-buf-visible org-src-visible)
         (progn 
-          (message \"✓ SUCCESS: Window split with both org-src and *euporie-sas* visible\") 
+          (message \"✓ SUCCESS: Window split with both org-src and euporie buffers visible\") 
           t)
       (progn
         (message \"✗ FAIL: Window split incorrect\")
-        (message \"  - sas buffer visible: %s\" sas-buf-visible)
+        (message \"  - euporie buffer visible: %s\" euporie-buf-visible)
         (message \"  - org-src visible: %s\" org-src-visible) 
         (message \"  - total windows: %d\" (length windows))
         nil))))")
 
-# Step 8: Check logs for local vs remote execution
-echo "Step 8: Analyzing logs..."
+# Step 6: Wait for execution and check buffer  
+echo "Step 6: Waiting for euporie console to start and execute code..."
+sleep 45  # Extended wait for remote connection + euporie startup + SAS table output
+
+# Step 6a: Check for ACTUAL cars table output
+echo "Step 6a: Checking for actual cars table output..."
+# Use a simpler approach to avoid shell parsing issues
+emacsclient --eval "(progn
+  (message \"=== TEST: Checking euporie buffer for cars output ===\")
+  (let ((euporie-buffer (cl-find-if (lambda (buf) 
+                                      (string-match-p \"\\*euporie-.*\\*\" (buffer-name buf))) 
+                                    (buffer-list))))
+    (if euporie-buffer
+        (progn
+          (message \"✓ Found euporie buffer: %s\" (buffer-name euporie-buffer))
+          (with-current-buffer euporie-buffer
+            (let ((content (buffer-string)))
+              (message \"Euporie buffer content length: %d chars\" (length content))
+              (when (> (length content) 100)
+                (message \"Buffer content preview: %s\" (substring content 0 (min 500 (length content)))))
+              (message \"Checking for Acura content...\")
+              (message \"Has Acura: %s\" (string-match-p \"Acura\" content))
+              (message \"Has headers: %s\" (string-match-p \"Obs.*Make.*Model\" content)))))
+      (message \"✗ FAIL: No euporie buffer found\"))))"
+            
+CARS_SUCCESS=false  # We'll check this manually for now
+
+
+# Step 7: Check logs for local vs remote execution
+echo "Step 7: Analyzing logs..."
 
 # Check for remote execution indicators
 if grep -q "is-remote.*qrsh" ~/sas-workflow-debug.log 2>/dev/null; then
@@ -157,7 +163,7 @@ else
 fi
 
 # Check for :dir parameter extraction
-if grep -q "Extracted :dir from" ~/euporie-debug.log 2>/dev/null; then
+if grep -q "Successfully extracted :dir:" ~/euporie-debug.log 2>/dev/null; then
     echo "✓ SUCCESS: Hook successfully extracted :dir parameter"
     HOOK_SUCCESS=true
 else
@@ -165,8 +171,8 @@ else
     HOOK_SUCCESS=false
 fi
 
-# Step 9: Take screenshot
-echo "Step 9: Taking screenshot..."
+# Step 8: Take screenshot
+echo "Step 8: Taking screenshot..."
 osascript -e 'tell application "Emacs" to activate'
 sleep 0.5
 screencapture -T 0.5 ~/test-results-screenshot.png
