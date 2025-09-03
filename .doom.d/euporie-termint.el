@@ -578,9 +578,9 @@ DIR parameter is used for SAS to determine local vs remote execution."
   (interactive)
   
   (let* ((kernel (euporie-termint-detect-kernel))
-         ;; Use stored :dir parameter from org-babel execution if available
-         (current-dir (or (and (boundp 'euporie-termint-current-dir) euporie-termint-current-dir)
-                          default-directory))
+         ;; Extract :dir parameter from current context on-demand
+         (extracted-dir (euporie-termint-extract-dir-from-current-context))
+         (current-dir (or extracted-dir default-directory))
          (code (cond
                 ((use-region-p)
                  (buffer-substring-no-properties (region-beginning) (region-end)))
@@ -644,36 +644,80 @@ Supports remote execution via :dir parameter."
 
 ;;; Hook Functions
 
-(defun euporie-termint-extract-dir-from-parent-block ()
-  "Extract :dir parameter from parent org block when entering org-src edit mode."
-  (when (and (string-match "\\*Org Src.*\\[" (buffer-name))
-             (boundp 'org-src--beg-marker) 
-             org-src--beg-marker
-             (marker-buffer org-src--beg-marker))
-    (condition-case err
-        (with-current-buffer (marker-buffer org-src--beg-marker)
-          (save-excursion
-            (goto-char org-src--beg-marker)
-            (let* ((element (org-element-at-point))
-                   (params (org-babel-parse-header-arguments
-                           (or (org-element-property :parameters element) "")))
-                   (dir (cdr (assoc :dir params))))
-              (when dir
-                (setq euporie-termint-current-dir dir)
-                (euporie-termint-debug-log 'info "Extracted :dir from parent block: %s" dir))
-              dir)))
-      (error 
-       (euporie-termint-debug-log 'warn "Failed to extract :dir from parent block: %s" err)
-       nil))))
+(defun euporie-termint-extract-dir-from-current-context ()
+  "Extract :dir parameter from current org-src context using multiple strategies."
+  (euporie-termint-debug-log 'debug "=== Extracting :dir from current context ===")
+  (euporie-termint-debug-log 'debug "Buffer name: %s" (buffer-name))
+  
+  (let ((extracted-dir nil))
+    
+    ;; Strategy 1: Try org-src markers if available and valid
+    (when (and (string-match "\\*Org Src.*\\[" (buffer-name))
+               (boundp 'org-src--beg-marker) 
+               org-src--beg-marker)
+      (euporie-termint-debug-log 'debug "Strategy 1: Trying org-src markers")
+      (euporie-termint-debug-log 'debug "  Marker: %s" org-src--beg-marker)
+      (euporie-termint-debug-log 'debug "  Marker buffer: %s" (marker-buffer org-src--beg-marker))
+      
+      (when (and (markerp org-src--beg-marker)
+                 (marker-buffer org-src--beg-marker)
+                 (buffer-live-p (marker-buffer org-src--beg-marker))
+                 (marker-position org-src--beg-marker))
+        (condition-case err
+            (with-current-buffer (marker-buffer org-src--beg-marker)
+              (save-excursion
+                (goto-char (marker-position org-src--beg-marker))
+                (let* ((element (org-element-at-point))
+                       (params (org-babel-parse-header-arguments
+                               (or (org-element-property :parameters element) "")))
+                       (dir (cdr (assoc :dir params))))
+                  (euporie-termint-debug-log 'debug "  Strategy 1 - Element: %s" element)
+                  (euporie-termint-debug-log 'debug "  Strategy 1 - Parsed params: %s" params)
+                  (euporie-termint-debug-log 'debug "  Strategy 1 - Extracted dir: %s" dir)
+                  (setq extracted-dir dir))))
+          (error 
+           (euporie-termint-debug-log 'debug "  Strategy 1 failed: %s" err)))))
+    
+    ;; Strategy 2: Search for org buffers with matching src block if Strategy 1 failed
+    (when (and (not extracted-dir)
+               (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name)))
+      (euporie-termint-debug-log 'debug "Strategy 2: Searching org buffers for matching src block")
+      (let ((lang (match-string 1 (buffer-name)))
+            (src-content (buffer-substring-no-properties (point-min) (min 100 (point-max)))))
+        (euporie-termint-debug-log 'debug "  Looking for language: %s" lang)
+        (euporie-termint-debug-log 'debug "  Content snippet: %s" (substring src-content 0 (min 50 (length src-content))))
+        
+        (dolist (buffer (buffer-list))
+          (when (and (not extracted-dir)
+                     (with-current-buffer buffer (eq major-mode 'org-mode)))
+            (condition-case err
+                (with-current-buffer buffer
+                  (save-excursion
+                    (goto-char (point-min))
+                    ;; Search for src blocks with :dir parameter
+                    (while (and (not extracted-dir)
+                                (re-search-forward (format "^[ \t]*#\\+begin_src[ \t]+%s\\>.*:dir[ \t]+\\([^ \t\n]+\\)" lang) nil t))
+                      (let ((found-dir (match-string 1)))
+                        (euporie-termint-debug-log 'debug "  Strategy 2 - Found :dir in buffer %s: %s" (buffer-name buffer) found-dir)
+                        (setq extracted-dir found-dir)))))
+              (error 
+               (euporie-termint-debug-log 'debug "  Strategy 2 - Error in buffer %s: %s" (buffer-name buffer) err)))))))
+    
+    (if extracted-dir
+        (progn
+          (setq euporie-termint-current-dir extracted-dir)
+          (euporie-termint-debug-log 'info "✓ Successfully extracted :dir: %s" extracted-dir))
+      (progn
+        (setq euporie-termint-current-dir nil)
+        (euporie-termint-debug-log 'debug "No :dir parameter found, using default directory")))
+    
+    extracted-dir))
 
 ;;; Buffer keybinding setup helper function
 
 (defun euporie-termint-setup-buffer-keybinding ()
   "Set up C-RET keybinding for the current org-src buffer."
   (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
-    
-    ;; Extract :dir parameter from parent block
-    (euporie-termint-extract-dir-from-parent-block)
     
     ;; Unbind in all evil states for this buffer
     (evil-local-set-key 'insert (kbd "C-<return>") nil)

@@ -164,6 +164,14 @@ SAS execution defaults to local instead of remote because `dir: nil` is passed t
 
 **FOCUS**: SAS integration using the same proven stack (eat, termint, sas_kernel, euporie, org-babel) with additional TRAMP+QRSH remote execution support.
 
+**MANDATORY TESTING PROTOCOL**: 
+Always run the automated test script `~/.doom.d/test.sh` when debugging C-RET :dir parameter issues. Use a sub-agent to:
+1. Execute the test script: `cd ~/.doom.d && ./test.sh`
+2. Check the screenshot at `~/test-results-screenshot.png` 
+3. Analyze logs for success criteria:
+   - SUCCESS: Screenshot shows cars output AND logs show remote execution
+   - FAILURE: No cars output OR logs show `dir: nil` (local execution)
+
 **CRITICAL**: Main Claude's role is ONLY orchestration and planning. Always delegate to specialized agents:
 
 #### 1. **euporie-developer Agent** (SAS Implementation)
