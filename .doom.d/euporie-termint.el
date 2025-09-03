@@ -8,7 +8,7 @@
 ;;; Code:
 
 (require 'termint nil t)
-(require 'tramp-wrds nil t)
+(require 'tramp-qrsh nil t)
 (require 'org)
 (require 'ob)
 
@@ -44,17 +44,6 @@ Some protocols may work better with stata_kernel than others."
 (defvar sas-workflow-debug-log-file (expand-file-name "sas-workflow-debug.log" "~/")
   "Log file for SAS workflow debugging information.")
 
-;; Global variable to store :dir parameter for C-RET access
-(defvar euporie-termint-current-dir nil
-  "Stores the :dir parameter from org-src edit buffers for C-RET access.")
-
-(defun sas-workflow-debug-log (level format-string &rest args)
-  "Log LEVEL message with FORMAT-STRING and ARGS to SAS workflow debug file."
-  (let ((message (apply #'format format-string args))
-        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
-    (with-temp-buffer
-      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
-      (append-to-file (point-min) (point-max) sas-workflow-debug-log-file))))
 
 (defun euporie-termint-debug-log (level format-string &rest args)
   "Log LEVEL message with FORMAT-STRING and ARGS to debug file."
@@ -66,15 +55,6 @@ Some protocols may work better with stata_kernel than others."
 
 ;;; Environment Detection
 
-(defun euporie-termint--check-direnv-allowed (directory)
-  "Check if direnv is already allowed for DIRECTORY."
-  (when (and (boundp 'envrc-direnv-executable) envrc-direnv-executable)
-    (let* ((default-directory directory)
-           (status-output (with-temp-buffer
-                           (when (zerop (call-process envrc-direnv-executable nil t nil "status"))
-                             (buffer-string)))))
-      (and status-output
-           (string-match-p "Found RC allowPath" status-output)))))
 
 (defun euporie-termint--build-euporie-command (kernel project-dir)
   "Build euporie console command for KERNEL in PROJECT-DIR."
@@ -274,14 +254,14 @@ Otherwise start local SAS session."
        (message "Warning: Failed to start local SAS euporie console: %s" err)))))
 
 (defun euporie-sas-start-remote (remote-dir)
-  "Start remote SAS euporie console by using working tramp-wrds-termint and then sending euporie command."
+  "Start remote SAS euporie console by using working tramp-qrsh-with-custom-buffer and then sending euporie command."
   (let* ((localname (if (file-remote-p remote-dir)
                         (file-remote-p remote-dir 'localname)
                       remote-dir)))
     
     (sas-workflow-debug-log 'info "=== euporie-sas-start-remote called with dir: %s ===" remote-dir)
     (sas-workflow-debug-log 'debug "Remote SAS start - localname extracted: %s" localname)
-    (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds-termint + euporie command for: %s" remote-dir)
+    (euporie-termint-debug-log 'info "Remote SAS start - using tramp-qrsh-with-custom-buffer + euporie command for: %s" remote-dir)
     
     ;; Use the working tramp-qrsh-with-custom-buffer to get to compute node
     (sas-workflow-debug-log 'info "Calling tramp-qrsh-with-custom-buffer to establish remote connection with buffer name: *euporie-sas*")
@@ -518,29 +498,6 @@ DIR parameter is used for SAS to determine local vs remote execution."
                 (run-with-timer 1 1 #'euporie-termint-check-new-stata-graphs))
           (euporie-termint-debug-log 'info "File monitor started with timer polling (fswatch not available)"))))))
 
-(defun euporie-termint-stata-file-event-handler (process output)
-  "Handle file system events for Stata graphics directory."
-  (when (and output (> (length (string-trim output)) 0))
-    (euporie-termint-check-new-stata-graphs)))
-
-(defun euporie-termint-check-new-stata-graphs ()
-  "Check for new graph files in Stata cache directory and display them."
-  (let* ((cache-dir (expand-file-name "~/.stata_kernel_cache"))
-         (png-files (when (file-directory-p cache-dir)
-                     (directory-files cache-dir t "\\.png$")))
-         (newest-file (when png-files
-                       (car (sort png-files (lambda (a b)
-                                             (time-less-p (nth 5 (file-attributes b))
-                                                         (nth 5 (file-attributes a)))))))))
-    
-    (when (and newest-file
-               (not (string= newest-file euporie-termint-stata-last-graph-file))
-               (get-buffer "*euporie-stata*"))  ; Only if Stata buffer is active
-      
-      (setq euporie-termint-stata-last-graph-file newest-file)
-      (euporie-termint-debug-log 'info "New Stata graph detected: %s" newest-file)
-      ;; Graphics handled by euporie natively - no manual display needed
-      )))
 
 ;;; Code Execution
 
@@ -725,12 +682,8 @@ Supports remote execution via :dir parameter."
                (euporie-termint-debug-log 'debug "  Strategy 2 - Error in buffer %s: %s" (buffer-name buffer) err)))))))
     
     (if extracted-dir
-        (progn
-          (setq euporie-termint-current-dir extracted-dir)
-          (euporie-termint-debug-log 'info "✓ Successfully extracted :dir: %s" extracted-dir))
-      (progn
-        (setq euporie-termint-current-dir nil)
-        (euporie-termint-debug-log 'debug "No :dir parameter found, using default directory")))
+        (euporie-termint-debug-log 'info "✓ Successfully extracted :dir: %s" extracted-dir)
+      (euporie-termint-debug-log 'debug "No :dir parameter found, using default directory"))
     
     extracted-dir))
 
