@@ -53,6 +53,14 @@ Some protocols may work better with stata_kernel than others."
       (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
       (append-to-file (point-min) (point-max) euporie-termint-debug-log-file))))
 
+(defun sas-workflow-debug-log (level format-string &rest args)
+  "Log LEVEL message with FORMAT-STRING and ARGS to SAS workflow debug file."
+  (let ((message (apply #'format format-string args))
+        (timestamp (format-time-string "%Y-%m-%d %H:%M:%S")))
+    (with-temp-buffer
+      (insert (format "[%s] [%s] %s\n" timestamp (upcase (symbol-name level)) message))
+      (append-to-file (point-min) (point-max) sas-workflow-debug-log-file))))
+
 ;;; Environment Detection
 
 
