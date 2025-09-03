@@ -44,6 +44,10 @@ Some protocols may work better with stata_kernel than others."
 (defvar sas-workflow-debug-log-file (expand-file-name "sas-workflow-debug.log" "~/")
   "Log file for SAS workflow debugging information.")
 
+;; Global variable to store :dir parameter for C-RET access
+(defvar euporie-termint-current-dir nil
+  "Stores the :dir parameter from org-src edit buffers for C-RET access.")
+
 (defun sas-workflow-debug-log (level format-string &rest args)
   "Log LEVEL message with FORMAT-STRING and ARGS to SAS workflow debug file."
   (let ((message (apply #'format format-string args))
@@ -74,19 +78,11 @@ Some protocols may work better with stata_kernel than others."
 
 (defun euporie-termint--build-euporie-command (kernel project-dir)
   "Build euporie console command for KERNEL in PROJECT-DIR."
-  (let* ((graphics-protocol (if (string= kernel "stata") 
+  (let ((graphics-protocol (if (string= kernel "stata") 
                                euporie-termint-stata-graphics-protocol
-                             euporie-termint-graphics-protocol))
-         (pixi-path (or (executable-find "pixi") "/Users/vwh7mb/.nix-profile/bin/pixi"))
-         (is-remote (file-remote-p project-dir)))
-    
-    (if is-remote
-        ;; For remote execution, don't wrap with shell cd - TRAMP handles directory context
-        (format "pixi run euporie console --graphics=%s --kernel-name=%s" graphics-protocol kernel)
-      ;; For local execution, use full path and set working directory
-      (let ((default-directory project-dir))
-        (format "%s run euporie console --graphics=%s --kernel-name=%s" 
-                pixi-path graphics-protocol kernel)))))
+                             euporie-termint-graphics-protocol)))
+    ;; Use euporie directly (no pixi run) for both local and remote to avoid network calls
+    (format "euporie console --graphics=%s --kernel-name=%s" graphics-protocol kernel)))
 
 ;;; Kernel Management Functions
 
@@ -287,28 +283,29 @@ Otherwise start local SAS session."
     (sas-workflow-debug-log 'debug "Remote SAS start - localname extracted: %s" localname)
     (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds-termint + euporie command for: %s" remote-dir)
     
-    ;; Use the working tramp-wrds-termint to get to compute node with custom buffer name
-    (sas-workflow-debug-log 'info "Calling tramp-wrds-termint to establish remote connection with buffer name: *euporie-sas*")
-    (let ((wrds-buffer (tramp-wrds-termint nil "*euporie-sas*")))
+    ;; Use the working tramp-qrsh-with-custom-buffer to get to compute node
+    (sas-workflow-debug-log 'info "Calling tramp-qrsh-with-custom-buffer to establish remote connection with buffer name: *euporie-sas*")
+    (let ((wrds-buffer (tramp-qrsh-with-custom-buffer nil "*euporie-sas*")))
       
       (if wrds-buffer
           (progn
-            (sas-workflow-debug-log 'info "tramp-wrds-termint returned buffer: %s" (buffer-name wrds-buffer))
+            (sas-workflow-debug-log 'info "tramp-qrsh-with-custom-buffer returned buffer: %s" (buffer-name wrds-buffer))
             ;; Keep original buffer name - termint expects this for send functions
             (sas-workflow-debug-log 'debug "Using original buffer name: %s" (buffer-name wrds-buffer)))
-        (sas-workflow-debug-log 'error "tramp-wrds-termint returned nil - no remote connection established"))
+        (sas-workflow-debug-log 'error "tramp-qrsh-with-custom-buffer returned nil - no remote connection established"))
       
       (when wrds-buffer
         
         ;; Send euporie command to the compute node shell with suppressed output
-        (let ((euporie-cmd (format "cd %s 2>/dev/null && export PATH=/home/nyu/eddyhu/env/bin:$PATH >/dev/null 2>&1 && clear && exec euporie console --kernel-name=sas --graphics=sixel" localname)))
+        (let ((euporie-cmd (format "cd %s 2>/dev/null && exec %s" localname 
+                                  (euporie-termint--build-euporie-command "sas" remote-dir))))
           (sas-workflow-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
           (with-current-buffer wrds-buffer
             ;; Use termint send function (not comint)
             (sas-workflow-debug-log 'debug "Sending euporie command to compute node via termint")
-            (if (fboundp 'termint-wrds-qrsh-send-string)
-                (termint-wrds-qrsh-send-string euporie-cmd)
-              (error "termint-wrds-qrsh-send-string not available"))
+            (if (fboundp 'termint-euporie-sas-send-string)
+                (termint-euporie-sas-send-string euporie-cmd)
+              (error "termint-euporie-sas-send-string not available"))
             (sas-workflow-debug-log 'info "Successfully sent euporie command to compute node")
             (euporie-termint-debug-log 'info "Sent euporie command to compute node: %s" euporie-cmd)))
         
@@ -535,8 +532,6 @@ DIR parameter is used for SAS to determine local vs remote execution."
                     ((string= kernel "python") #'termint-euporie-python-send-string)
                     ((string= kernel "r") #'termint-euporie-r-send-string)
                     ((string= kernel "stata") #'termint-euporie-stata-send-string)
-                    ((and (string= kernel "sas") is-remote-sas) 
-                     #'termint-wrds-qrsh-send-string)  ; Use WRDS-specific send function
                     ((string= kernel "sas") #'termint-euporie-sas-send-string)
                     (t (error "Unsupported kernel: %s" kernel)))))
     
@@ -583,10 +578,9 @@ DIR parameter is used for SAS to determine local vs remote execution."
   (interactive)
   
   (let* ((kernel (euporie-termint-detect-kernel))
-         ;; Detect TRAMP path for remote execution (SAS-specific for now)
-         (current-dir (or (and (string= kernel "sas") 
-                              (file-remote-p default-directory))
-                         default-directory))
+         ;; Use stored :dir parameter from org-babel execution if available
+         (current-dir (or (and (boundp 'euporie-termint-current-dir) euporie-termint-current-dir)
+                          default-directory))
          (code (cond
                 ((use-region-p)
                  (buffer-substring-no-properties (region-beginning) (region-end)))
@@ -609,27 +603,30 @@ DIR parameter is used for SAS to determine local vs remote execution."
 
 (defun org-babel-execute:python (body params)
   "Execute Python BODY with PARAMS using euporie."
-  (let ((buffer (euporie-termint-get-or-create-buffer "python")))
-    (when buffer
-      (euporie-termint-send-code "python" body)
-      ;; For org-babel, we don't return output as euporie handles display
-      "")))
+  (let ((dir (cdr (assoc :dir params))))
+    (let ((buffer (euporie-termint-get-or-create-buffer "python")))
+      (when buffer
+        (euporie-termint-send-code "python" body dir)
+        ;; For org-babel, we don't return output as euporie handles display
+        ""))))
 
 (defun org-babel-execute:R (body params)
   "Execute R BODY with PARAMS using euporie."
-  (let ((buffer (euporie-termint-get-or-create-buffer "r")))
-    (when buffer
-      (euporie-termint-send-code "r" body)
-      ;; For org-babel, we don't return output as euporie handles display
-      "")))
+  (let ((dir (cdr (assoc :dir params))))
+    (let ((buffer (euporie-termint-get-or-create-buffer "r")))
+      (when buffer
+        (euporie-termint-send-code "r" body dir)
+        ;; For org-babel, we don't return output as euporie handles display
+        ""))))
 
 (defun org-babel-execute:stata (body params)
   "Execute Stata BODY with PARAMS using euporie."
-  (let ((buffer (euporie-termint-get-or-create-buffer "stata")))
-    (when buffer
-      (euporie-termint-send-code "stata" body)
-      ;; For org-babel, we don't return output as euporie handles display
-      "")))
+  (let ((dir (cdr (assoc :dir params))))
+    (let ((buffer (euporie-termint-get-or-create-buffer "stata")))
+      (when buffer
+        (euporie-termint-send-code "stata" body dir)
+        ;; For org-babel, we don't return output as euporie handles display
+        ""))))
 
 (defun org-babel-execute:sas (body params)
   "Execute SAS BODY with PARAMS using euporie.
@@ -640,15 +637,43 @@ Supports remote execution via :dir parameter."
     (euporie-termint-debug-log 'debug "  extracted dir: %s" dir)
     (euporie-termint-debug-log 'debug "  dir type: %s" (type-of dir))
     (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
+    
     (euporie-termint-send-code "sas" body dir)
     ;; For org-babel, we don't return output as euporie handles display
     ""))
+
+;;; Hook Functions
+
+(defun euporie-termint-extract-dir-from-parent-block ()
+  "Extract :dir parameter from parent org block when entering org-src edit mode."
+  (when (and (string-match "\\*Org Src.*\\[" (buffer-name))
+             (boundp 'org-src--beg-marker) 
+             org-src--beg-marker
+             (marker-buffer org-src--beg-marker))
+    (condition-case err
+        (with-current-buffer (marker-buffer org-src--beg-marker)
+          (save-excursion
+            (goto-char org-src--beg-marker)
+            (let* ((element (org-element-at-point))
+                   (params (org-babel-parse-header-arguments
+                           (or (org-element-property :parameters element) "")))
+                   (dir (cdr (assoc :dir params))))
+              (when dir
+                (setq euporie-termint-current-dir dir)
+                (euporie-termint-debug-log 'info "Extracted :dir from parent block: %s" dir))
+              dir)))
+      (error 
+       (euporie-termint-debug-log 'warn "Failed to extract :dir from parent block: %s" err)
+       nil))))
 
 ;;; Buffer keybinding setup helper function
 
 (defun euporie-termint-setup-buffer-keybinding ()
   "Set up C-RET keybinding for the current org-src buffer."
   (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
+    
+    ;; Extract :dir parameter from parent block
+    (euporie-termint-extract-dir-from-parent-block)
     
     ;; Unbind in all evil states for this buffer
     (evil-local-set-key 'insert (kbd "C-<return>") nil)
