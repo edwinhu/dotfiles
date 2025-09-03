@@ -301,9 +301,9 @@ Otherwise start local SAS session."
         (sas-workflow-debug-log 'debug "Creating split window layout for remote SAS console")
         (euporie-termint-display-console-right wrds-buffer)
         
-        ;; Wait for SAS kernel to initialize (same as local SAS)
+        ;; Wait for SAS kernel to initialize (longer wait for terminal readiness)
         (sas-workflow-debug-log 'info "Waiting for remote SAS kernel to initialize...")
-        (sleep-for 8)  ; Longer wait for remote + SAS kernel startup
+        (sleep-for 12)  ; Extended wait for remote + SAS kernel startup + terminal readiness
         (sas-workflow-debug-log 'info "Remote SAS kernel initialization wait complete")
         (euporie-termint-debug-log 'info "Remote SAS kernel initialization wait complete")
         
