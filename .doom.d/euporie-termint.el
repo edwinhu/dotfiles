@@ -321,13 +321,14 @@ Otherwise start local SAS session."
                             (string-match-p "SAS Connection established" buffer-content)
                             (string-match-p "> $" buffer-content))
                     (sas-workflow-debug-log 'debug "Found SAS readiness indicator in buffer content")
-                    (setq ready t))))
+                    (setq ready t)))))
             ;; Fallback: if no readiness indicator after minimum time, assume ready
             (when (>= wait-count 3)  ; Fallback after 6 seconds
               (setq ready t)))
           (if ready
               (sas-workflow-debug-log 'info "SAS kernel ready after %d polls (%d seconds)" wait-count (* wait-count 2))
             (sas-workflow-debug-log 'warn "SAS kernel readiness timeout after %d seconds" (* wait-count 2))))
+        (sas-workflow-debug-log 'info "Remote SAS kernel initialization wait complete")
         (euporie-termint-debug-log 'info "Remote SAS kernel initialization wait complete")
         
         (sas-workflow-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
