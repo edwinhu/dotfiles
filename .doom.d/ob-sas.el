@@ -97,15 +97,7 @@
       (append (org-babel-variable-assignments:sas params)
 	      (list body))) "\n")))
 
-(defun org-babel-execute:sas (body params)
-  "Execute a block of SAS code using euporie.
-This function is called by `org-babel-execute-src-block'.
-Supports remote execution via :dir parameter."
-  (let ((dir (cdr (assoc :dir params))))
-    (when (featurep 'euporie-termint)
-      (euporie-termint-send-code "sas" body dir))
-    ;; For org-babel, we don't return output as euporie handles display
-    ""))
+;; org-babel-execute:sas is now defined in euporie-termint.el to avoid duplication
 
 (defun org-babel-prep-session:sas (session params)
   "Prepare SESSION according to the header arguments specified in PARAMS."

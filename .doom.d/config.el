@@ -57,7 +57,8 @@
 (let ((doom-dir (or (bound-and-true-p doom-user-dir)
                    (expand-file-name "~/.doom.d/"))))
   (load (expand-file-name "tramp-qrsh.el" doom-dir))
-  (load (expand-file-name "euporie-termint.el" doom-dir)))
+  (load (expand-file-name "euporie-termint.el" doom-dir))
+  (load (expand-file-name "ob-sas.el" doom-dir)))
 
 (when (and (featurep 'euporie-termint)
            (fboundp 'euporie-termint-setup) 

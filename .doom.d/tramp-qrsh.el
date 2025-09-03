@@ -150,14 +150,22 @@ Returns buffer ready for command sending - compatible with SAS remote integratio
               ;; Call the dynamically generated start function
               (funcall (intern (format "termint-%s-start" session-id)))
               (sleep-for 4)  ; Allow time for SSH + qrsh connection
-              (let ((buffer (get-buffer final-buffer-name)))
-                (if buffer
+              ;; termint creates buffer based on session-id, but we want custom name
+              (let ((termint-buffer (get-buffer (format "*%s*" session-id)))
+                    (target-buffer (get-buffer final-buffer-name)))
+                ;; If we have a custom buffer name, rename the termint buffer
+                (when (and termint-buffer (not (string= (format "*%s*" session-id) final-buffer-name)))
+                  (with-current-buffer termint-buffer
+                    (rename-buffer final-buffer-name)))
+                ;; Now get the final buffer
+                (let ((buffer (get-buffer final-buffer-name)))
+                  (if buffer
+                      (progn
+                        (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
+                        buffer)
                     (progn
-                      (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
-                      buffer)
-                  (progn
-                    (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
-                    nil))))
+                      (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
+                      nil)))))
           (error 
            (tramp-qrsh-debug-log 'error "Failed to start wrds-qrsh session: %s" err)
            (message "Failed to start wrds-qrsh session: %s" err)
@@ -180,14 +188,22 @@ Returns buffer ready for command sending - compatible with SAS remote integratio
               ;; Call the dynamically generated start function
               (funcall (intern (format "termint-%s-start" session-id)))
               (sleep-for 4)  ; Allow time for SSH + qrsh connection
-              (let ((buffer (get-buffer final-buffer-name)))
-                (if buffer
+              ;; termint creates buffer based on session-id, but we want custom name
+              (let ((termint-buffer (get-buffer (format "*%s*" session-id)))
+                    (target-buffer (get-buffer final-buffer-name)))
+                ;; If we have a custom buffer name, rename the termint buffer
+                (when (and termint-buffer (not (string= (format "*%s*" session-id) final-buffer-name)))
+                  (with-current-buffer termint-buffer
+                    (rename-buffer final-buffer-name)))
+                ;; Now get the final buffer
+                (let ((buffer (get-buffer final-buffer-name)))
+                  (if buffer
+                      (progn
+                        (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
+                        buffer)
                     (progn
-                      (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
-                      buffer)
-                  (progn
-                    (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
-                    nil))))
+                      (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
+                      nil)))))
           (error 
            (tramp-qrsh-debug-log 'error "Failed to start wrds-qrshmem session: %s" err)
            (message "Failed to start wrds-qrshmem session: %s" err)
@@ -215,9 +231,9 @@ Returns buffer ready for command sending - compatible with SAS remote integratio
                     (progn
                       (tramp-qrsh-debug-log 'info "Successfully created %s session buffer" final-buffer-name)
                       buffer)
-                  (progn
-                    (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
-                    nil))))
+                    (progn
+                      (tramp-qrsh-debug-log 'error "Failed to create %s session buffer" final-buffer-name)
+                      nil)))))
           (error 
            (tramp-qrsh-debug-log 'error "Failed to start wrds-qrshnow session: %s" err)
            (message "Failed to start wrds-qrshnow session: %s" err)
@@ -225,7 +241,7 @@ Returns buffer ready for command sending - compatible with SAS remote integratio
      
      (t 
       (tramp-qrsh-debug-log 'error "Unknown WRDS method: %s" method)
-      (error "Unknown WRDS method: %s" method)))))
+      (error "Unknown WRDS method: %s" method))))
 
 (defun tramp-qrsh-session (&optional queue)
   "Open a termint+eat session on WRDS compute node via qrsh.

@@ -114,8 +114,12 @@ Some protocols may work better with stata_kernel than others."
                              ("EUPORIE_GRAPHICS" . "sixel"))))
     ;; Start the termint session with error handling
     (condition-case err
-        (let ((default-directory euporie-termint-project-dir))
-          (termint-euporie-python-start))
+        (progn
+          (let ((default-directory euporie-termint-project-dir))
+            (termint-euporie-python-start))
+          ;; Display in split window using proper console display function
+          (when-let ((buffer (get-buffer "*euporie-python*")))
+            (euporie-termint-display-console-right buffer)))
       (error 
        (euporie-termint-debug-log 'error "Failed to start Python termint: %s" err)
        (message "Warning: Failed to start Python euporie console: %s" err)))
@@ -149,8 +153,12 @@ Some protocols may work better with stata_kernel than others."
                              ("EUPORIE_GRAPHICS" . "sixel"))))
     ;; Start the termint session with error handling
     (condition-case err
-        (let ((default-directory euporie-termint-project-dir))
-          (termint-euporie-r-start))
+        (progn
+          (let ((default-directory euporie-termint-project-dir))
+            (termint-euporie-r-start))
+          ;; Display in split window using proper console display function
+          (when-let ((buffer (get-buffer "*euporie-r*")))
+            (euporie-termint-display-console-right buffer)))
       (error 
        (euporie-termint-debug-log 'error "Failed to start R termint: %s" err)
        (message "Warning: Failed to start R euporie console: %s" err)))
@@ -186,8 +194,12 @@ Some protocols may work better with stata_kernel than others."
                              ("LC_ALL" . "en_US.UTF-8"))))       ; Full locale support
     ;; Start the termint session with error handling
     (condition-case err
-        (let ((default-directory euporie-termint-project-dir))
-          (termint-euporie-stata-start))
+        (progn
+          (let ((default-directory euporie-termint-project-dir))
+            (termint-euporie-stata-start))
+          ;; Display in split window using proper console display function
+          (when-let ((buffer (get-buffer "*euporie-stata*")))
+            (euporie-termint-display-console-right buffer)))
       (error 
        (euporie-termint-debug-log 'error "Failed to start Stata termint: %s" err)
        (message "Warning: Failed to start Stata euporie console: %s" err)))
@@ -209,7 +221,7 @@ If DIR is provided and is a TRAMP path, start remote SAS session.
 Otherwise start local SAS session."
   (interactive)
   (let* ((is-remote (and dir (file-remote-p dir)))
-         (buffer-name (if is-remote "*wrds-qrsh*" "*euporie-sas*")))
+         (buffer-name "*euporie-sas*"))
     
     (sas-workflow-debug-log 'info "=== euporie-sas-start called with dir: %s ===" (or dir "nil"))
     (sas-workflow-debug-log 'debug "SAS start - is-remote: %s, buffer-name: %s" is-remote buffer-name)
@@ -275,9 +287,9 @@ Otherwise start local SAS session."
     (sas-workflow-debug-log 'debug "Remote SAS start - localname extracted: %s" localname)
     (euporie-termint-debug-log 'info "Remote SAS start - using tramp-wrds-termint + euporie command for: %s" remote-dir)
     
-    ;; Use the working tramp-wrds-termint to get to compute node
-    (sas-workflow-debug-log 'info "Calling tramp-wrds-termint to establish remote connection")
-    (let ((wrds-buffer (tramp-wrds-termint)))
+    ;; Use the working tramp-wrds-termint to get to compute node with custom buffer name
+    (sas-workflow-debug-log 'info "Calling tramp-wrds-termint to establish remote connection with buffer name: *euporie-sas*")
+    (let ((wrds-buffer (tramp-wrds-termint nil "*euporie-sas*")))
       
       (if wrds-buffer
           (progn
@@ -315,12 +327,17 @@ Otherwise start local SAS session."
   "Get or create euporie termint buffer for KERNEL.
 DIR parameter is used for SAS to determine local vs remote execution."
   (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
-         (buffer-name (if is-remote-sas "*wrds-qrsh*" (format "*euporie-%s*" kernel)))
+         (buffer-name (format "*euporie-%s*" kernel))
          (start-func (cond
                      ((string= kernel "python") #'euporie-python-start)
                      ((string= kernel "r") #'euporie-r-start)
                      ((string= kernel "stata") #'euporie-stata-start)
-                     ((string= kernel "sas") (lambda () (euporie-sas-start dir)))
+                     ((string= kernel "sas") 
+                      (progn
+                        (euporie-termint-debug-log 'info "Creating SAS start lambda with dir: %s" (or dir "nil"))
+                        (lambda () 
+                          (euporie-termint-debug-log 'info "Lambda called - about to call euporie-sas-start with dir: %s" (or dir "nil"))
+                          (euporie-sas-start dir))))
                      (t (error "Unsupported kernel: %s" kernel))))
          (buffer (get-buffer buffer-name)))
     
@@ -614,7 +631,18 @@ DIR parameter is used for SAS to determine local vs remote execution."
       ;; For org-babel, we don't return output as euporie handles display
       "")))
 
-;; Note: org-babel-execute:sas is defined in ob-sas.el - no duplicate definition needed here
+(defun org-babel-execute:sas (body params)
+  "Execute SAS BODY with PARAMS using euporie.
+Supports remote execution via :dir parameter."
+  (let ((dir (cdr (assoc :dir params))))
+    (euporie-termint-debug-log 'debug "=== org-babel-execute:sas ENTRY ===")
+    (euporie-termint-debug-log 'debug "  params: %s" params)
+    (euporie-termint-debug-log 'debug "  extracted dir: %s" dir)
+    (euporie-termint-debug-log 'debug "  dir type: %s" (type-of dir))
+    (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
+    (euporie-termint-send-code "sas" body dir)
+    ;; For org-babel, we don't return output as euporie handles display
+    ""))
 
 ;;; Buffer keybinding setup helper function
 
