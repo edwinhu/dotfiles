@@ -302,9 +302,9 @@ Otherwise start local SAS session."
         (euporie-termint-display-console-right wrds-buffer)
         
         ;; Wait for SAS kernel to initialize with smart polling
-        (sas-workflow-debug-log 'info "Waiting for remote SAS kernel to initialize...")
+        (sas-workflow-debug-log 'info "Waiting for remote SAS kernel connection to establish...")
         (let ((wait-count 0)
-              (max-wait 6)  ; 6 * 2 = 12 seconds max
+              (max-wait 15)  ; 15 * 2 = 30 seconds max (SAS can be slow to connect)
               (ready nil))
           (while (and (< wait-count max-wait) (not ready))
             (sleep-for 2)
@@ -316,14 +316,15 @@ Otherwise start local SAS session."
               (with-current-buffer wrds-buffer
                 (let ((buffer-content (buffer-substring-no-properties (max 1 (- (point-max) 500)) (point-max))))
                   (sas-workflow-debug-log 'debug "Checking buffer content for readiness indicators")
-                  ;; Look for SAS/Jupyter prompt indicators
-                  (when (or (string-match-p "In \\[[0-9]*\\]:" buffer-content)
-                            (string-match-p "SAS Connection established" buffer-content)
-                            (string-match-p "> $" buffer-content))
-                    (sas-workflow-debug-log 'debug "Found SAS readiness indicator in buffer content")
+                  ;; Look specifically for SAS kernel connection established message
+                  ;; This is more reliable than generic prompts as it confirms the SAS kernel is actually ready
+                  (when (string-match-p "SAS Connection established\\. Subprocess id is [0-9]+" buffer-content)
+                    (sas-workflow-debug-log 'info "Found SAS Connection established message - kernel is ready")
                     (setq ready t)))))
-            ;; Fallback: if no readiness indicator after minimum time, assume ready
-            (when (>= wait-count 3)  ; Fallback after 6 seconds
+            ;; Conservative fallback: only if we've waited long enough and still no connection message
+            ;; This is less likely to result in premature "ready" status
+            (when (>= wait-count 12)  ; Fallback after 24 seconds - gives SAS more time to connect
+              (sas-workflow-debug-log 'warn "SAS connection message not found after %d seconds, assuming ready" (* wait-count 2))
               (setq ready t)))
           (if ready
               (sas-workflow-debug-log 'info "SAS kernel ready after %d polls (%d seconds)" wait-count (* wait-count 2))
@@ -337,6 +338,7 @@ Otherwise start local SAS session."
 
 
 ;;; Buffer Management
+
 
 (defun euporie-termint-get-or-create-buffer (kernel &optional dir)
   "Get or create euporie termint buffer for KERNEL.
@@ -404,29 +406,58 @@ DIR parameter is used for SAS to determine local vs remote execution."
 ;;; Language Detection
 
 (defun euporie-termint-detect-kernel ()
-  "Detect kernel from org-src buffer language or org-mode code block."
-  (let ((lang-from-buffer-name (when (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
-                                 (match-string 1 (buffer-name))))
-        (lang-from-variable (bound-and-true-p org-src--lang))
-        (lang-from-org-element (when (eq major-mode 'org-mode)
-                                 (org-element-property :language (org-element-at-point)))))
-    
-    (let ((detected-lang (or lang-from-variable lang-from-buffer-name lang-from-org-element)))
+  "Detect kernel from buffer name or org-src context."
+  ;; Check if we're in a euporie buffer - extract kernel from buffer name
+  (cond 
+   ((string-match "\\*euporie-\\(.+\\)\\*" (buffer-name))
+    (let ((kernel (match-string 1 (buffer-name))))
+      (euporie-termint-debug-log 'debug "Detected kernel from euporie buffer name: %s" kernel)
+      kernel))
+   
+   ;; Check org-src buffer context
+   ((string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name))
+    (let ((lang (match-string 1 (buffer-name))))
+      (euporie-termint-debug-log 'debug "Detected kernel from org-src buffer: %s" lang)
       (cond
-       ((or (and detected-lang (or (string-equal detected-lang "r") (string-equal detected-lang "R"))) 
-            (eq major-mode 'ess-r-mode)) 
-        "r")
-       ((or (and detected-lang (string-equal detected-lang "python")) 
-            (eq major-mode 'python-mode) 
-            (eq major-mode 'python-ts-mode)) 
-        "python")
-       ((or (and detected-lang (string-equal detected-lang "stata")) 
-            (eq major-mode 'stata-mode)) 
-        "stata")
-       ((or (and detected-lang (or (string-equal detected-lang "sas") (string-equal detected-lang "SAS"))) 
-            (eq major-mode 'SAS-mode)) 
-        "sas")
-       (t "python")))))
+       ((or (string-equal lang "r") (string-equal lang "R")) "r")
+       ((string-equal lang "python") "python") 
+       ((string-equal lang "stata") "stata")
+       ((or (string-equal lang "sas") (string-equal lang "SAS")) "sas")
+       (t lang))))
+   
+   ;; Check org-src variable
+   ((bound-and-true-p org-src--lang)
+    (let ((lang org-src--lang))
+      (euporie-termint-debug-log 'debug "Detected kernel from org-src variable: %s" lang)
+      (cond
+       ((or (string-equal lang "r") (string-equal lang "R")) "r")
+       ((string-equal lang "python") "python")
+       ((string-equal lang "stata") "stata") 
+       ((or (string-equal lang "sas") (string-equal lang "SAS")) "sas")
+       (t lang))))
+   
+   ;; Check org-mode element at point
+   ((eq major-mode 'org-mode)
+    (let ((lang (org-element-property :language (org-element-at-point))))
+      (when lang
+        (euporie-termint-debug-log 'debug "Detected kernel from org element: %s" lang)
+        (cond
+         ((or (string-equal lang "r") (string-equal lang "R")) "r")
+         ((string-equal lang "python") "python")
+         ((string-equal lang "stata") "stata")
+         ((or (string-equal lang "sas") (string-equal lang "SAS")) "sas")
+         (t lang)))))
+   
+   ;; Check major mode
+   ((eq major-mode 'ess-r-mode) "r")
+   ((or (eq major-mode 'python-mode) (eq major-mode 'python-ts-mode)) "python")
+   ((eq major-mode 'stata-mode) "stata")
+   ((eq major-mode 'SAS-mode) "sas")
+   
+   ;; Default fallback
+   (t 
+    (euporie-termint-debug-log 'debug "No kernel detected, defaulting to python")
+    "python")))
 
 ;;; Console Display Management
 
@@ -586,6 +617,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
   "Send current region or line to euporie console with automatic kernel detection."
   (interactive)
   
+  (euporie-termint-debug-log 'info "=== C-RET pressed in buffer: %s ===" (buffer-name))
   (let* ((kernel (euporie-termint-detect-kernel))
          ;; Extract :dir parameter from current context on-demand
          (extracted-dir (euporie-termint-extract-dir-from-current-context))
@@ -599,9 +631,13 @@ DIR parameter is used for SAS to determine local vs remote execution."
                    (if (eq (org-element-type element) 'src-block)
                        (org-element-property :value element)
                      (thing-at-point 'line t))))
+                ((string-match-p "\\*Org Src.*\\[" (buffer-name))
+                 ;; In org-src edit buffer, get the entire buffer content
+                 (buffer-substring-no-properties (point-min) (point-max)))
                 (t
                  (thing-at-point 'line t)))))
     
+    (euporie-termint-debug-log 'debug "Code extraction result: %s" (if code (substring code 0 (min 100 (length code))) "nil"))
     (when code
       (euporie-termint-debug-log 'info "Executing %s code via euporie in dir: %s" kernel current-dir)
       (if (and (string= kernel "sas") (file-remote-p current-dir))
