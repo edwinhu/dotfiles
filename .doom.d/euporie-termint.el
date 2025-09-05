@@ -310,47 +310,78 @@ Otherwise start local SAS session."
                 (termint-euporie-sas-send-string euporie-cmd)
               (error "termint-euporie-sas-send-string not available"))
             (sas-workflow-debug-log 'info "Successfully sent euporie command to compute node")
-            (euporie-termint-debug-log 'info "Sent euporie command to compute node: %s" euporie-cmd)))
+            (euporie-termint-debug-log 'info "Sent euporie command to compute node: %s" euporie-cmd)
+            
+            ;; Allow time for euporie console to start
+            (sleep-for 3)))  ; Brief delay for console startup
         
         ;; Display in split window using proper console display function
         (sas-workflow-debug-log 'debug "Creating split window layout for remote SAS console")
         (euporie-termint-display-console-right wrds-buffer)
         
-        ;; Wait for SAS kernel to initialize with smart polling
-        (sas-workflow-debug-log 'info "Waiting for remote SAS kernel connection to establish...")
+        ;; STEP 1: Wait for SAS kernel to be ready (empty circle)
+        (sas-workflow-debug-log 'info "STEP 1: Waiting for SAS kernel ready indicator (empty circle)...")
         (let ((wait-count 0)
-              (max-wait 15)  ; 15 * 2 = 30 seconds max (SAS can be slow to connect)
-              (ready nil))
-          (while (and (< wait-count max-wait) (not ready))
-            (sleep-for 2)
+              (max-wait 60)  ; 60 * 0.25 = 15 seconds max
+              (kernel-ready nil))
+          (while (and (< wait-count max-wait) (not kernel-ready))
+            (sleep-for 0.25)  ; Poll every 250ms for SAS kernel
             (setq wait-count (1+ wait-count))
-            (sas-workflow-debug-log 'debug "Polling for SAS readiness - attempt %d/%d" wait-count max-wait)
+            (sas-workflow-debug-log 'debug "Polling for SAS kernel ready - attempt %d/%d (%.1f seconds)" wait-count max-wait (* wait-count 0.25))
             ;; Check buffer content for SAS readiness indicators
-            (when (and (>= wait-count 2)  ; Minimum 4 seconds before checking
+            (when (and (>= wait-count 8)  ; Minimum 2 seconds before checking
                        (buffer-live-p wrds-buffer))
               (with-current-buffer wrds-buffer
                 (let ((buffer-content (buffer-substring-no-properties (max 1 (- (point-max) 500)) (point-max))))
-                  (sas-workflow-debug-log 'debug "Checking buffer content for readiness indicators")
-                  ;; Look specifically for SAS kernel connection established message
-                  ;; This is more reliable than generic prompts as it confirms the SAS kernel is actually ready
-                  (when (string-match-p "SAS Connection established\\. Subprocess id is [0-9]+" buffer-content)
-                    (sas-workflow-debug-log 'info "Found SAS Connection established message - kernel is ready")
-                    (setq ready t)))))
-            ;; Conservative fallback: only if we've waited long enough and still no connection message
-            ;; This is less likely to result in premature "ready" status
-            (when (>= wait-count 12)  ; Fallback after 24 seconds - gives SAS more time to connect
-              (sas-workflow-debug-log 'warn "SAS connection message not found after %d seconds, assuming ready" (* wait-count 2))
-              (setq ready t)))
-          (if ready
-              (sas-workflow-debug-log 'info "SAS kernel ready after %d polls (%d seconds)" wait-count (* wait-count 2))
-            (sas-workflow-debug-log 'warn "SAS kernel readiness timeout after %d seconds" (* wait-count 2))))
+                  (sas-workflow-debug-log 'debug "Checking buffer content for SAS empty circle indicator")
+                  ;; Look for SAS indicator with EMPTY circle (kernel ready to receive input)
+                  (when (string-match-p "▌SAS▐▌○▐" buffer-content)
+                    (sas-workflow-debug-log 'info "Found SAS kernel ready indicator (empty circle) - ready for initialization")
+                    (setq kernel-ready t))))))
+          (if kernel-ready
+              (sas-workflow-debug-log 'info "STEP 1 COMPLETE: SAS kernel ready after %d polls (%.1f seconds)" wait-count (* wait-count 0.25))
+            (sas-workflow-debug-log 'warn "STEP 1 TIMEOUT: No SAS ready indicator after %.1f seconds" (* wait-count 0.25))))
+        
+        ;; STEP 2: Mode switching approach for euporie console initialization
+        (sas-workflow-debug-log 'info "STEP 2: Initializing euporie console with mode switching...")
+        (when (buffer-live-p wrds-buffer)
+          (with-current-buffer wrds-buffer
+            ;; Ensure euporie console is in normal mode (press Escape)
+            (sas-workflow-debug-log 'debug "Step 2a: Ensuring normal mode (Escape)")
+            (termint-euporie-sas-send-string "\e")  ; Escape to normal mode
+            (sleep-for 0.2)  ; Brief pause for mode switch
+            
+            ;; Send C-e to initialize kernel (works in normal mode)
+            (sas-workflow-debug-log 'debug "Step 2b: Sending C-e to initialize kernel")
+            (termint-euporie-sas-send-string "\C-e")  ; Kernel initialization
+            (sleep-for 0.3)  ; Brief pause for initialization
+            
+            ;; Switch to insert mode (press 'i')
+            (sas-workflow-debug-log 'debug "Step 2c: Switching to insert mode (i)")
+            (termint-euporie-sas-send-string "i")  ; Insert mode
+            (sleep-for 0.2)  ; Brief pause for mode switch
+            
+            (sas-workflow-debug-log 'info "Mode switching initialization complete - console ready for code input"))))
         (sas-workflow-debug-log 'info "Remote SAS kernel initialization wait complete")
         (euporie-termint-debug-log 'info "Remote SAS kernel initialization wait complete")
         
         (sas-workflow-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
         (euporie-termint-debug-log 'info "Remote SAS setup complete - buffer: %s" (buffer-name wrds-buffer))
-        wrds-buffer))))
+        wrds-buffer)))
 
+
+;;; Send Functions
+
+;; Global send function for SAS (works for both local and remote)
+(defun termint-euporie-sas-send-string (code)
+  "Send code to SAS euporie console (works for both local and remote)."
+  (when (get-buffer "*euporie-sas*")
+    (with-current-buffer "*euporie-sas*"
+      (let ((proc (get-buffer-process "*euporie-sas*")))
+        (when proc
+          (process-send-string proc code)
+          ;; Send second newline to ensure execution in euporie console
+          (process-send-string proc "\n"))))))
 
 ;;; Buffer Management
 
