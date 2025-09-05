@@ -58,7 +58,8 @@
                    (expand-file-name "~/.doom.d/"))))
   (load (expand-file-name "tramp-qrsh.el" doom-dir))
   (load (expand-file-name "euporie-termint.el" doom-dir))
-  (load (expand-file-name "ob-sas.el" doom-dir)))
+  (load (expand-file-name "ob-sas.el" doom-dir))
+  (load (expand-file-name "ob-stata.el" doom-dir)))
 
 (when (and (featurep 'euporie-termint)
            (fboundp 'euporie-termint-setup) 
@@ -88,10 +89,14 @@
     ;; Essential org-src window setup
     (setq org-src-window-setup 'current-window
           org-support-shift-select 'always)))
+
 ;; Doom-specific configuration that needs to run after doom loads
 (after! org
   ;; CRITICAL: Popup rules for org-src buffers - required for org-edit-src-code
   (set-popup-rule! "^\\*Org Src" :ignore t)
   (set-popup-rule! "^\\*SAS Console" :ignore t)
   )
+
+;; Claude Code IDE configuration (moved to separate file for better organization)
+(load! "claude-code-config")
 
