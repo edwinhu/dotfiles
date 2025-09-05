@@ -150,7 +150,7 @@ Returns buffer ready for command sending."
                         ((equal queue "highmem") "qrsh -q highmem.q")
                         ((equal queue "now") "qrsh -now yes -q interactive.q")
                         (t "qrsh -q interactive.q")))
-         (full-command (format "ssh -t -q wrds %s" qrsh-command)))
+         (full-command "ssh -t -q wrds"))
     
     ;; Kill existing buffer if it exists
     (when (get-buffer final-buffer-name)
@@ -171,7 +171,42 @@ Returns buffer ready for command sending."
           (tramp-qrsh-debug-log 'info "Starting %s session..." session-id)
           ;; Call the dynamically generated start function
           (funcall (intern (format "termint-%s-start" session-id)))
-          (sleep-for 3)  ; Allow time for connection
+          ;; Wait for SSH connection with frequent polling
+          (let ((ssh-wait-count 0)
+                (ssh-connected nil))
+            (while (and (< ssh-wait-count 15) (not ssh-connected))  ; Max 1.5 seconds
+              (sleep-for 0.1)  ; Poll every 100ms
+              (setq ssh-wait-count (1+ ssh-wait-count))
+              (let ((proc (get-buffer-process (format "*%s*" session-id))))
+                (when (and proc (process-live-p proc))
+                  (let ((buffer-content (with-current-buffer (format "*%s*" session-id)
+                                          (buffer-substring-no-properties (max 1 (- (point-max) 200)) (point-max)))))
+                    (when (string-match-p "\\$\\|#" buffer-content)  ; Shell prompt appeared
+                      (tramp-qrsh-debug-log 'info "SSH connection established after %d polls (%.1f seconds)" ssh-wait-count (* ssh-wait-count 0.1))
+                      (setq ssh-connected t))))))
+            (unless ssh-connected
+              (tramp-qrsh-debug-log 'warn "SSH connection timeout after 1.5 seconds, proceeding anyway")))
+          
+          ;; Send qrsh command separately after SSH connection
+          (let ((proc (get-buffer-process (format "*%s*" session-id))))
+            (when proc
+              (tramp-qrsh-debug-log 'info "Sending qrsh command: %s" qrsh-command)
+              (process-send-string proc (concat qrsh-command "\n"))
+              ;; Wait for QRSH connection with frequent polling
+              (let ((qrsh-wait-count 0)
+                    (qrsh-connected nil))
+                (while (and (< qrsh-wait-count 20) (not qrsh-connected))  ; Max 2 seconds
+                  (sleep-for 0.1)  ; Poll every 100ms
+                  (setq qrsh-wait-count (1+ qrsh-wait-count))
+                  (let ((buffer-content (with-current-buffer (format "*%s*" session-id)
+                                          (buffer-substring-no-properties (max 1 (- (point-max) 300)) (point-max)))))
+                    (when (string-match-p "\\$\\|#" buffer-content)  ; Compute node prompt appeared
+                      (tramp-qrsh-debug-log 'info "QRSH connection established after %d polls (%.1f seconds)" qrsh-wait-count (* qrsh-wait-count 0.1))
+                      (setq qrsh-connected t))))
+                (unless qrsh-connected
+                  (tramp-qrsh-debug-log 'warn "QRSH connection timeout after 2 seconds, proceeding anyway"))
+                (tramp-qrsh-debug-log 'info "Sending clear command to remove banner")
+                (process-send-string proc "clear\n"))))
           (let ((termint-buffer (get-buffer (format "*%s*" session-id))))
             ;; If we have a custom buffer name, rename the termint buffer
             (when (and termint-buffer (not (string= (format "*%s*" session-id) final-buffer-name)))

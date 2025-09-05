@@ -346,9 +346,10 @@ Otherwise start local SAS session."
         (sas-workflow-debug-log 'info "STEP 2: Initializing euporie console with mode switching...")
         (when (buffer-live-p wrds-buffer)
           (with-current-buffer wrds-buffer
-            ;; Ensure euporie console is in normal mode (press Escape)
-            (sas-workflow-debug-log 'debug "Step 2a: Ensuring normal mode (Escape)")
-            (termint-euporie-sas-send-string "\e")  ; Escape to normal mode
+            ;; Ensure euporie console is in normal mode using evil-mode function
+            (sas-workflow-debug-log 'debug "Step 2a: Ensuring normal mode (evil-force-normal-state)")
+            (when (fboundp 'evil-force-normal-state)
+              (evil-force-normal-state))
             (sleep-for 0.2)  ; Brief pause for mode switch
             
             ;; Send C-e to initialize kernel (works in normal mode)
@@ -356,9 +357,18 @@ Otherwise start local SAS session."
             (termint-euporie-sas-send-string "\C-e")  ; Kernel initialization
             (sleep-for 0.3)  ; Brief pause for initialization
             
-            ;; Switch to insert mode (press 'i')
-            (sas-workflow-debug-log 'debug "Step 2c: Switching to insert mode (i)")
-            (termint-euporie-sas-send-string "i")  ; Insert mode
+            ;; Switch to insert mode using proper evil-mode function without sending literal characters
+            (sas-workflow-debug-log 'debug "Step 2c: Switching to insert mode using evil-insert-state")
+            (when (fboundp 'evil-insert-state)
+              (condition-case err
+                  (evil-insert-state)
+                (error 
+                 (sas-workflow-debug-log 'warn "evil-insert-state failed: %s, trying evil-insert" err)
+                 (when (fboundp 'evil-insert)
+                   (condition-case err2
+                       (evil-insert 1)
+                     (error 
+                      (sas-workflow-debug-log 'error "Both evil-insert-state and evil-insert failed: %s" err2)))))))
             (sleep-for 0.2)  ; Brief pause for mode switch
             
             (sas-workflow-debug-log 'info "Mode switching initialization complete - console ready for code input"))))
@@ -675,9 +685,13 @@ If FORCE-EXECUTE is non-nil, send Ctrl+Enter to execute immediately."
       
       ;; Send code to console with proper targeting
       (if is-remote-sas
-          ;; For remote SAS, send directly to the *euporie-sas* buffer
+          ;; For remote SAS, we need to wait for initialization to complete before sending code
           (progn
-            (sas-workflow-debug-log 'debug "Using remote SAS send - targeting buffer directly")
+            (sas-workflow-debug-log 'debug "Using remote SAS send - checking if initialization is complete")
+            ;; Wait for the initialization sequence to complete (it adds a short delay already)
+            ;; We need an additional delay to ensure mode switching is complete
+            (sleep-for 0.5)  ; Additional wait after mode switching completion
+            (sas-workflow-debug-log 'debug "Mode switching delay complete - now sending code")
             (with-current-buffer buffer
               (sas-workflow-debug-log 'debug "Calling send function: %s with code" send-func)
               (funcall send-func code)

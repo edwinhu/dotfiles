@@ -237,12 +237,12 @@ Always run the automated test script `~/.doom.d/test.sh` when debugging C-RET :d
 
 When configuring Emacs/Doom, follow this **mandatory workflow** in order:
 
-### 1. ⚠️ ALWAYS Check for Lisp Errors AFTER EVERY ELISP FILE MODIFICATION
+### 1. ⚠️ ALWAYS Use Sub-Agents for Elisp Syntax Errors
 
-**MANDATORY**: Check syntax errors IMMEDIATELY after modifying any `.el` file. Missing parentheses will prevent entire modules from loading and cause cryptic errors like "No such language mode: sas-mode".
+**MANDATORY**: NEVER attempt to fix Elisp syntax errors manually. ALWAYS use a sub-agent with the general-purpose agent type to fix syntax errors in `.el` files. Missing parentheses will prevent entire modules from loading and cause cryptic errors like "No such language mode: sas-mode".
 
 ```bash
-# Check ALL modified files for syntax errors
+# WRONG: Manual syntax checking - DO NOT DO THIS
 cd ~/.doom.d
 emacs --batch --eval "(progn
   (dolist (file '(\"config.el\" \"euporie-termint.el\" \"ob-sas.el\" \"other-file.el\"))
@@ -251,7 +251,14 @@ emacs --batch --eval "(progn
       (error (message \"✗ %s: %s\" file err)))))"
 ```
 
-**CRITICAL REMINDER**: Syntax errors in one file (like `euporie-termint.el`) will prevent other files (like `ob-sas.el`) from loading, causing cascading failures. **Always check syntax BEFORE investigating other issues.**
+**CORRECT APPROACH**: Use sub-agent to fix syntax errors:
+
+```
+Task(subagent_type="general-purpose", description="Fix Emacs syntax error", 
+     prompt="Fix the syntax error in /path/to/file.el. Use incremental parsing to identify exact locations of unmatched parentheses, brackets, or quotes. Verify file loads without errors after fixes.")
+```
+
+**CRITICAL REMINDER**: Syntax errors in one file (like `euporie-termint.el`) will prevent other files (like `ob-sas.el`) from loading, causing cascading failures. **Always use sub-agents for syntax fixes BEFORE investigating other issues.**
 
 ### 2. ⚠️ ALWAYS Test Lisp Commands
 

@@ -1,9 +1,137 @@
 #!/bin/bash
 
-# test.sh - Automated test for C-RET :dir parameter extraction
+# test.sh - Automated test for C-RET :dir parameter extraction with timing analysis
 # Tests the hook-based approach for extracting :dir from org-src blocks
 
 set -e
+
+# Timing variables
+TEST_START_TIME=$(date +%s.%3N)
+PHASES_START=()
+PHASES_END=()
+PHASE_NAMES=("Emacs Startup" "Code Execution")
+
+# Function to record phase start time
+record_phase_start() {
+    local phase_name="$1"
+    local timestamp=$(date +%s.%3N)
+    PHASES_START+=($timestamp)
+    echo "[TIMING] $phase_name phase started at $(date)"
+}
+
+# Function to record phase end time
+record_phase_end() {
+    local phase_name="$1"
+    local timestamp=$(date +%s.%3N)
+    PHASES_END+=($timestamp)
+    echo "[TIMING] $phase_name phase completed at $(date)"
+}
+
+# Function to parse timing from logs
+parse_log_timing() {
+    local ssh_time="N/A"
+    local qrsh_time="N/A" 
+    local sas_time="N/A"
+    
+    # Parse SAS kernel timing
+    if [ -f ~/sas-workflow-debug.log ]; then
+        sas_time=$(rg "SAS kernel ready after.*\(([0-9.]+) seconds\)" ~/sas-workflow-debug.log -o -r '$1' 2>/dev/null | tail -1)
+        [ -z "$sas_time" ] && sas_time="N/A"
+    fi
+    
+    # Parse SSH connection timing (if logs are enhanced to include this)
+    if [ -f ~/tramp-qrsh-debug.log ]; then
+        ssh_time=$(rg "SSH connection established after.*\(([0-9.]+) seconds\)" ~/tramp-qrsh-debug.log -o -r '$1' 2>/dev/null | tail -1)
+        [ -z "$ssh_time" ] && ssh_time="N/A"
+        
+        qrsh_time=$(rg "QRSH connection established after.*\(([0-9.]+) seconds\)" ~/tramp-qrsh-debug.log -o -r '$1' 2>/dev/null | tail -1)
+        [ -z "$qrsh_time" ] && qrsh_time="N/A"
+    fi
+    
+    echo "$ssh_time $qrsh_time $sas_time"
+}
+
+# Function to calculate phase durations from script timing
+calculate_phase_durations() {
+    local durations=()
+    for i in "${!PHASES_START[@]}"; do
+        if [ ${#PHASES_END[@]} -gt $i ]; then
+            local duration=$(echo "${PHASES_END[$i]} - ${PHASES_START[$i]}" | bc -l 2>/dev/null || echo "0")
+            durations+=($duration)
+        else
+            durations+=("N/A")
+        fi
+    done
+    echo "${durations[@]}"
+}
+
+# Function to analyze timing performance
+analyze_timing() {
+    local log_times=($1)  # ssh qrsh sas from logs
+    local script_durations=($2)  # calculated from script timing
+    
+    echo ""
+    echo "=== TIMING ANALYSIS ==="
+    
+    # Display timing from logs (more accurate for actual process timing)
+    [ "${log_times[0]}" != "N/A" ] && echo "SSH Connection: ${log_times[0]} seconds"
+    [ "${log_times[1]}" != "N/A" ] && echo "QRSH Connection: ${log_times[1]} seconds"  
+    [ "${log_times[2]}" != "N/A" ] && echo "SAS Kernel Startup: ${log_times[2]} seconds"
+    
+    # Display script phase timing (includes waiting and coordination overhead)
+    for i in "${!PHASE_NAMES[@]}"; do
+        if [ "${script_durations[$i]}" != "N/A" ] && [ "${script_durations[$i]}" != "0" ]; then
+            printf "%-20s %s seconds (script timing)\n" "${PHASE_NAMES[$i]}:" "${script_durations[$i]}"
+        fi
+    done
+    
+    # Total time
+    local total_time=$(echo "$(date +%s.%3N) - $TEST_START_TIME" | bc -l)
+    echo "Total Time: $total_time seconds"
+    
+    echo ""
+    echo "PERFORMANCE ANALYSIS:"
+    
+    # Find fastest/slowest from log times
+    local fastest_phase="Unknown"
+    local slowest_phase="Unknown"
+    local fastest_time=999999
+    local slowest_time=0
+    
+    for i in "${!PHASE_NAMES[@]}"; do
+        local time="${log_times[$i]}"
+        if [ "$time" != "N/A" ] && [ "$(echo "$time > 0" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
+            if [ "$(echo "$time < $fastest_time" | bc -l)" = "1" ]; then
+                fastest_time=$time
+                fastest_phase="${PHASE_NAMES[$i]}"
+            fi
+            if [ "$(echo "$time > $slowest_time" | bc -l)" = "1" ]; then
+                slowest_time=$time  
+                slowest_phase="${PHASE_NAMES[$i]}"
+            fi
+        fi
+    done
+    
+    [ "$fastest_phase" != "Unknown" ] && echo "- Fastest phase: $fastest_phase ($fastest_time seconds)"
+    [ "$slowest_phase" != "Unknown" ] && echo "- Slowest phase: $slowest_phase ($slowest_time seconds)"
+    
+    # Flag slow phases (>5 seconds)
+    echo "- Performance warnings:"
+    local warnings_found=false
+    for i in "${!PHASE_NAMES[@]}"; do
+        local time="${log_times[$i]}"
+        if [ "$time" != "N/A" ] && [ "$(echo "$time > 5.0" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
+            echo "  ⚠️  ${PHASE_NAMES[$i]} is slow ($time seconds)"
+            warnings_found=true
+        fi
+    done
+    [ "$warnings_found" = false ] && echo "  ✓ All phases under 5 seconds"
+    
+    # Flag very slow total time
+    if [ "$(echo "$total_time > 60.0" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
+        echo "  ⚠️  Total test time is slow ($total_time seconds)"
+    fi
+}
 
 echo "=== Euporie C-RET :dir Parameter Test ==="
 echo "$(date): Starting automated test"
@@ -17,11 +145,14 @@ sleep 2
 echo "Step 2: Clearing debug logs..."
 > ~/sas-workflow-debug.log
 > ~/euporie-debug.log
+> ~/tramp-qrsh-debug.log 2>/dev/null || true
 
 # Step 3: Start fresh Emacs WITHOUT environment inheritance issues
 echo "Step 3: Starting fresh Emacs.app..."
+record_phase_start "Emacs Startup"
 osascript -e 'tell application "Emacs" to activate' &
 sleep 5  # Wait for Emacs to fully load
+record_phase_end "Emacs Startup"
 
 # Step 3a: Configure euporie environment in Emacs session
 echo "Step 3a: Configuring euporie environment in Emacs..."
@@ -54,8 +185,9 @@ emacsclient --eval "(progn
         (message \"Buffer mode: %s\" major-mode))
     (error \"Could not find SAS block with :dir parameter\")))"
 
-# Step 5: Execute C-RET in org-src edit buffer
+# Step 5: Execute C-RET in org-src edit buffer (this triggers remote connection)
 echo "Step 5: Executing C-RET in org-src edit buffer..."
+record_phase_start "Code Execution"
 emacsclient --eval "(progn
   (message \"=== TEST: Executing C-RET ===\")
   ;; Switch to the SAS org-src edit buffer
@@ -117,6 +249,7 @@ WINDOW_SPLIT_SUCCESS=$(emacsclient --eval "(progn
 # Step 6: Wait for execution and check buffer  
 echo "Step 6: Waiting for euporie console to start and execute code..."
 sleep 45  # Extended wait for remote connection + euporie startup + SAS table output
+record_phase_end "Code Execution"
 
 # Step 6a: Check for ACTUAL cars table output
 echo "Step 6a: Checking for actual cars table output..."
@@ -178,6 +311,11 @@ sleep 0.5
 screencapture -T 0.5 ~/test-results-screenshot.png
 echo "Screenshot saved to ~/test-results-screenshot.png"
 
+# Step 9: Analyze timing performance
+echo "Step 9: Analyzing timing performance..."
+LOG_TIMES=$(parse_log_timing)
+SCRIPT_DURATIONS=$(calculate_phase_durations)
+
 # Summary
 echo ""
 echo "=== STRICT TEST SUMMARY ==="
@@ -203,6 +341,9 @@ echo "- Hook extraction: $HOOK_SUCCESS"
 echo "- Remote execution: $REMOTE_SUCCESS"
 echo "- Local execution avoided: $([ "$LOCAL_DETECTED" = false ] && echo true || echo false)"
 
+# Display timing analysis
+analyze_timing "$LOG_TIMES" "$SCRIPT_DURATIONS"
+
 if [ "$CARS_SUCCESS" = true ] && [ "$SPLIT_SUCCESS" = true ] && [ "$HOOK_SUCCESS" = true ] && [ "$REMOTE_SUCCESS" = true ] && [ "$LOCAL_DETECTED" = false ]; then
     echo "🎉 OVERALL RESULT: SUCCESS"
     echo "- All criteria met: cars output, window split, remote execution"
@@ -217,6 +358,7 @@ echo ""
 echo "Debug files:"
 echo "- SAS workflow: ~/sas-workflow-debug.log"
 echo "- Euporie debug: ~/euporie-debug.log"
+echo "- TRAMP QRSH: ~/tramp-qrsh-debug.log"
 echo "- Screenshot: ~/test-results-screenshot.png"
 
 echo ""
@@ -226,5 +368,8 @@ tail -10 ~/sas-workflow-debug.log 2>/dev/null || echo "No log file found"
 
 echo "--- euporie-debug.log (last 10 lines) ---"  
 tail -10 ~/euporie-debug.log 2>/dev/null || echo "No log file found"
+
+echo "--- tramp-qrsh-debug.log (last 10 lines) ---"
+tail -10 ~/tramp-qrsh-debug.log 2>/dev/null || echo "No log file found"
 
 exit $EXIT_CODE
