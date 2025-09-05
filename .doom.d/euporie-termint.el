@@ -39,6 +39,21 @@ Some protocols may work better with stata_kernel than others."
   :type 'directory
   :group 'euporie-termint)
 
+;; ESS-style customizable window splitting thresholds
+(defcustom euporie-termint-width-threshold nil
+  "Minimum width for splitting windows sensibly to display console on right.
+See `split-width-threshold' for a detailed description.
+If nil, the value of `split-width-threshold' is used."
+  :group 'euporie-termint
+  :type '(choice (const nil) (integer)))
+
+(defcustom euporie-termint-height-threshold nil
+  "Minimum height for splitting windows sensibly to display console below.
+See `split-height-threshold' for a detailed description.
+If nil, the value of `split-height-threshold' is used."
+  :group 'euporie-termint
+  :type '(choice (const nil) (integer)))
+
 (defvar euporie-termint-debug-log-file (expand-file-name "euporie-debug.log" "~/")
   "Log file for euporie debugging information.")
 (defvar sas-workflow-debug-log-file (expand-file-name "sas-workflow-debug.log" "~/")
@@ -462,86 +477,60 @@ DIR parameter is used for SAS to determine local vs remote execution."
 ;;; Console Display Management
 
 (defun euporie-termint-display-console-right (buffer &optional original-buffer original-window)
-  "Display console BUFFER in a right split window, reusing existing splits when possible."
+  "Display console BUFFER in a right split window using ESS-style window management with reuse.
+This function uses ESS patterns but checks for existing console windows first."
   (let ((initial-window (or original-window (selected-window)))
         (initial-buffer (or original-buffer (current-buffer)))
-        (windows (window-list nil 'no-minibuf))
-        (left-window nil)
-        (right-window nil))
+        (console-window (get-buffer-window buffer 'visible)))
     
-    ;; Check if we already have a left/right split layout
-    (when (= (length windows) 2)
-      (let ((win1 (nth 0 windows))
-            (win2 (nth 1 windows)))
-        ;; Determine which is left and which is right based on window positions
-        (if (< (car (window-edges win1)) (car (window-edges win2)))
-            (setq left-window win1 right-window win2)
-          (setq left-window win2 right-window win1))))
+    (euporie-termint-debug-log 'info "ESS-style window display: buffer=%s from=%s console-window-exists=%s" 
+                               (buffer-name buffer) (buffer-name initial-buffer) 
+                               (if console-window "yes" "no"))
     
-    (cond
-     ;; Case 1: We have existing left/right split - reuse it
-     ((and left-window right-window)
-      (euporie-termint-debug-log 'info "Reusing existing left/right split layout")
-      (euporie-termint-debug-log 'debug "Window analysis: left-buffer=%s, right-buffer=%s, initial-buffer=%s" 
-                                 (buffer-name (window-buffer left-window))
-                                 (buffer-name (window-buffer right-window)) 
-                                 (buffer-name initial-buffer))
-      ;; If we're in org-src context, put org-src buffer in left window
-      (if (and (buffer-live-p initial-buffer)
-               (string-match-p "\\*Org Src.*\\[" (buffer-name initial-buffer)))
-          (progn
-            (euporie-termint-debug-log 'info "Org-src context: setting left=%s, right=%s" 
-                                       (buffer-name initial-buffer) (buffer-name buffer))
-            (set-window-buffer left-window initial-buffer)
-            (set-window-buffer right-window buffer)
-            (with-selected-window right-window
-              (goto-char (point-max)))
-            ;; Return to left window (org-src)
-            (select-window left-window))
-        ;; Non org-src context: just put euporie in right window, leave left unchanged
-        (progn
-          (euporie-termint-debug-log 'info "Non org-src context: keeping left=%s, setting right=%s" 
-                                     (buffer-name (window-buffer left-window)) (buffer-name buffer))
-          (set-window-buffer right-window buffer)
-          (with-selected-window right-window
-            (goto-char (point-max)))
-          ;; Return to original window
-          (select-window initial-window))))
-     
-     ;; Case 2: Org-src context but no existing split - create new split
-     ((and (buffer-live-p initial-buffer)
-           (string-match-p "\\*Org Src.*\\[" (buffer-name initial-buffer)))
-      (euporie-termint-debug-log 'info "Org-src context - creating new left/right split")
-      (delete-other-windows)
-      (set-window-buffer (selected-window) initial-buffer)
-      (let ((new-right-window (split-window-right)))
-        (set-window-buffer new-right-window buffer)
-        (with-selected-window new-right-window
-          (goto-char (point-max)))
-        ;; Stay in org-src buffer (left window)
-        (select-window initial-window)))
-     
-     ;; Case 3: Non org-src context - use standard display
-     (t
-      (euporie-termint-debug-log 'info "Non org-src context - using standard display")
-      (let ((console-window (display-buffer buffer
-                                            '((display-buffer-reuse-window
-                                               display-buffer-in-side-window)
-                                              (side . right)
-                                              (window-width . 0.5)
-                                              (inhibit-same-window . t)))))
-        
-        (when console-window
-          ;; Scroll to bottom in console
-          (with-selected-window console-window
-            (goto-char (point-max)))
+    ;; Save selected window to restore focus later (ESS pattern)
+    (save-selected-window
+      (cond
+       ;; Case 1: Console window already visible - just switch to it and scroll
+       (console-window
+        (euporie-termint-debug-log 'info "Reusing existing console window")
+        (with-selected-window console-window
+          (goto-char (point-max))))
+       
+       ;; Case 2: Need to create window - use ESS split-window-sensibly approach
+       (t
+        (let* ((split-width-threshold (or euporie-termint-width-threshold
+                                          split-width-threshold))   ; ESS customizable threshold
+               (split-height-threshold (or euporie-termint-height-threshold
+                                           split-height-threshold))  ; ESS customizable threshold  
+               (win (split-window-sensibly (selected-window))))         ; ESS split-window-sensibly
           
-          ;; Restore focus to original window
-          (when (window-live-p initial-window)
-            (select-window initial-window))
-          
-          (when (buffer-live-p initial-buffer)
-            (set-window-buffer (selected-window) initial-buffer))))))))
+          (if win
+              (progn
+                (euporie-termint-debug-log 'info "ESS-style split succeeded - using new window")
+                (set-window-buffer win buffer)
+                (with-selected-window win
+                  (goto-char (point-max))))
+            
+            ;; Fallback: use pop-to-buffer with reuse-window priority (ESS pattern)
+            (progn
+              (euporie-termint-debug-log 'info "ESS-style split failed - using pop-to-buffer fallback")
+              (let ((console-window (pop-to-buffer buffer 
+                                                   '((display-buffer-reuse-window
+                                                      display-buffer-in-side-window)
+                                                     (side . right)
+                                                     (window-width . 0.5)
+                                                     (inhibit-same-window . t)))))
+                (when console-window
+                  (with-selected-window console-window
+                    (goto-char (point-max)))))))))))
+    
+    ;; Ensure we return to the original buffer context (code/org-src stays on left)
+    (when (and (window-live-p initial-window) (buffer-live-p initial-buffer))
+      (select-window initial-window)
+      (unless (eq (current-buffer) initial-buffer)
+        (set-buffer initial-buffer)))
+    
+    (euporie-termint-debug-log 'info "ESS-style window display completed - focus restored")))
 
 ;;; Graphics File Monitor for Stata
 
