@@ -605,9 +605,10 @@ DIR parameter is used for SAS to determine local vs remote execution."
 
 ;;; Code Execution
 
-(defun euporie-termint-send-code (kernel code &optional dir)
-  "Send CODE to euporie console for KERNEL.
-DIR parameter is used for SAS to determine local vs remote execution."
+(defun euporie-termint-send-code (kernel code &optional dir force-execute)
+  "Send CODE to euporie console for KERNEL with optional immediate execution.
+DIR parameter is used for SAS to determine local vs remote execution.
+If FORCE-EXECUTE is non-nil, send Ctrl+Enter to execute immediately."
   (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
          (buffer (euporie-termint-get-or-create-buffer kernel dir))
          (send-func (cond
@@ -618,7 +619,8 @@ DIR parameter is used for SAS to determine local vs remote execution."
                     (t (error "Unsupported kernel: %s" kernel)))))
     
     (sas-workflow-debug-log 'info "=== euporie-termint-send-code called ===")
-    (sas-workflow-debug-log 'debug "Send code - kernel: %s, dir: %s, is-remote-sas: %s" kernel (or dir "nil") is-remote-sas)
+    (sas-workflow-debug-log 'debug "Send code - kernel: %s, dir: %s, is-remote-sas: %s, force-execute: %s" 
+                           kernel (or dir "nil") is-remote-sas force-execute)
     (sas-workflow-debug-log 'debug "Send code - buffer: %s, send-func: %s" 
                            (if buffer (buffer-name buffer) "nil") send-func)
     
@@ -636,12 +638,22 @@ DIR parameter is used for SAS to determine local vs remote execution."
             (sas-workflow-debug-log 'debug "Using remote SAS send - targeting buffer directly")
             (with-current-buffer buffer
               (sas-workflow-debug-log 'debug "Calling send function: %s with code" send-func)
-              (funcall send-func code)))
+              (funcall send-func code)
+              ;; Force execution by sending additional newline if requested (euporie docs: two blank lines force execution)
+              (when force-execute
+                (sas-workflow-debug-log 'debug "Sending additional newline to force execution")
+                ;; Send one additional newline (code already has one, this makes two blank lines total)
+                (funcall send-func "\n"))))
         ;; For other kernels, use standard approach
         (progn
           (when (string= kernel "sas")
             (sas-workflow-debug-log 'debug "Using local SAS send - standard approach"))
-          (funcall send-func code)))
+          (funcall send-func code)
+          ;; Force execution by sending additional newline if requested (euporie docs: two blank lines force execution)
+          (when force-execute
+            (euporie-termint-debug-log 'debug "Sending additional newline to force execution")
+            ;; Send one additional newline (code already has one, this makes two blank lines total)
+            (funcall send-func "\n"))))
       
       ;; Start file monitoring for Stata graphics if not already running
       (when (string= kernel "stata")
@@ -707,7 +719,8 @@ falling back to paragraph. Language-aware function detection."
 ;;; Main C-RET Integration Function
 
 (defun euporie-termint-send-region-or-line ()
-  "Send current region or line to euporie console with automatic kernel detection."
+  "Send current region or line to euporie console with automatic kernel detection.
+Always forces execution when no region is selected to ensure code runs immediately."
   (interactive)
   
   (euporie-termint-debug-log 'info "=== C-RET pressed in buffer: %s ===" (buffer-name))
@@ -715,8 +728,9 @@ falling back to paragraph. Language-aware function detection."
          ;; Extract :dir parameter from current context on-demand
          (extracted-dir (euporie-termint-extract-dir-from-current-context))
          (current-dir (or extracted-dir default-directory))
+         (has-region (use-region-p))
          (code (cond
-                ((use-region-p)
+                (has-region
                  (buffer-substring-no-properties (region-beginning) (region-end)))
                 ((eq major-mode 'org-mode)
                  ;; In org-mode, extract the current code block
@@ -728,14 +742,18 @@ falling back to paragraph. Language-aware function detection."
                  ;; In org-src edit buffer, use ESS-style region-function-paragraph logic
                  (euporie-termint--region-function-or-paragraph))
                 (t
-                 (thing-at-point 'line t)))))
+                 (thing-at-point 'line t))))
+         ;; Force execution when no region is selected (single line/paragraph execution)
+         (force-execution (not has-region)))
     
     (euporie-termint-debug-log 'debug "Code extraction result: %s" (if code (substring code 0 (min 100 (length code))) "nil"))
+    (euporie-termint-debug-log 'debug "Force execution: %s (no region selected: %s)" force-execution (not has-region))
+    
     (when code
-      (euporie-termint-debug-log 'info "Executing %s code via euporie in dir: %s" kernel current-dir)
+      (euporie-termint-debug-log 'info "Executing %s code via euporie in dir: %s (force: %s)" kernel current-dir force-execution)
       (if (and (string= kernel "sas") (file-remote-p current-dir))
-          (euporie-termint-send-code kernel code current-dir)
-        (euporie-termint-send-code kernel code)))))
+          (euporie-termint-send-code kernel code current-dir force-execution)
+        (euporie-termint-send-code kernel code nil force-execution)))))
 
 ;;; Org-babel Integration (Optional)
 
@@ -744,7 +762,7 @@ falling back to paragraph. Language-aware function detection."
   (let ((dir (cdr (assoc :dir params))))
     (let ((buffer (euporie-termint-get-or-create-buffer "python")))
       (when buffer
-        (euporie-termint-send-code "python" body dir)
+        (euporie-termint-send-code "python" body dir t)  ; Always force execution for org-babel
         ;; For org-babel, we don't return output as euporie handles display
         ""))))
 
@@ -753,7 +771,7 @@ falling back to paragraph. Language-aware function detection."
   (let ((dir (cdr (assoc :dir params))))
     (let ((buffer (euporie-termint-get-or-create-buffer "r")))
       (when buffer
-        (euporie-termint-send-code "r" body dir)
+        (euporie-termint-send-code "r" body dir t)  ; Always force execution for org-babel
         ;; For org-babel, we don't return output as euporie handles display
         ""))))
 
@@ -762,7 +780,7 @@ falling back to paragraph. Language-aware function detection."
   (let ((dir (cdr (assoc :dir params))))
     (let ((buffer (euporie-termint-get-or-create-buffer "stata")))
       (when buffer
-        (euporie-termint-send-code "stata" body dir)
+        (euporie-termint-send-code "stata" body dir t)  ; Always force execution for org-babel
         ;; For org-babel, we don't return output as euporie handles display
         ""))))
 
@@ -776,7 +794,7 @@ Supports remote execution via :dir parameter."
     (euporie-termint-debug-log 'debug "  dir type: %s" (type-of dir))
     (euporie-termint-debug-log 'info "SAS execution requested with dir: %s" dir)
     
-    (euporie-termint-send-code "sas" body dir)
+    (euporie-termint-send-code "sas" body dir t)  ; Always force execution for org-babel
     ;; For org-babel, we don't return output as euporie handles display
     ""))
 
