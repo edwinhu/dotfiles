@@ -462,26 +462,68 @@ DIR parameter is used for SAS to determine local vs remote execution."
 ;;; Console Display Management
 
 (defun euporie-termint-display-console-right (buffer &optional original-buffer original-window)
-  "Display console BUFFER in a right split window."
+  "Display console BUFFER in a right split window, reusing existing splits when possible."
   (let ((initial-window (or original-window (selected-window)))
-        (initial-buffer (or original-buffer (current-buffer))))
+        (initial-buffer (or original-buffer (current-buffer)))
+        (windows (window-list nil 'no-minibuf))
+        (left-window nil)
+        (right-window nil))
     
-    ;; Check if we're in an org-src edit buffer - if so, preserve it on the left
-    (if (and (buffer-live-p initial-buffer)
-             (string-match-p "\\*Org Src.*\\[" (buffer-name initial-buffer)))
-        (progn
-          ;; Org-src context: create explicit split with org-src on left
-          (euporie-termint-debug-log 'info "Org-src context detected - creating split with org-src on left")
-          (delete-other-windows)
-          (set-window-buffer (selected-window) initial-buffer)
-          (let ((right-window (split-window-right)))
+    ;; Check if we already have a left/right split layout
+    (when (= (length windows) 2)
+      (let ((win1 (nth 0 windows))
+            (win2 (nth 1 windows)))
+        ;; Determine which is left and which is right based on window positions
+        (if (< (car (window-edges win1)) (car (window-edges win2)))
+            (setq left-window win1 right-window win2)
+          (setq left-window win2 right-window win1))))
+    
+    (cond
+     ;; Case 1: We have existing left/right split - reuse it
+     ((and left-window right-window)
+      (euporie-termint-debug-log 'info "Reusing existing left/right split layout")
+      (euporie-termint-debug-log 'debug "Window analysis: left-buffer=%s, right-buffer=%s, initial-buffer=%s" 
+                                 (buffer-name (window-buffer left-window))
+                                 (buffer-name (window-buffer right-window)) 
+                                 (buffer-name initial-buffer))
+      ;; If we're in org-src context, put org-src buffer in left window
+      (if (and (buffer-live-p initial-buffer)
+               (string-match-p "\\*Org Src.*\\[" (buffer-name initial-buffer)))
+          (progn
+            (euporie-termint-debug-log 'info "Org-src context: setting left=%s, right=%s" 
+                                       (buffer-name initial-buffer) (buffer-name buffer))
+            (set-window-buffer left-window initial-buffer)
+            (set-window-buffer right-window buffer)
             (with-selected-window right-window
-              (set-window-buffer right-window buffer)
               (goto-char (point-max)))
-            ;; Stay in org-src buffer (left window)
-            (select-window initial-window)))
-      
-      ;; Non org-src context: use standard display
+            ;; Return to left window (org-src)
+            (select-window left-window))
+        ;; Non org-src context: just put euporie in right window, leave left unchanged
+        (progn
+          (euporie-termint-debug-log 'info "Non org-src context: keeping left=%s, setting right=%s" 
+                                     (buffer-name (window-buffer left-window)) (buffer-name buffer))
+          (set-window-buffer right-window buffer)
+          (with-selected-window right-window
+            (goto-char (point-max)))
+          ;; Return to original window
+          (select-window initial-window))))
+     
+     ;; Case 2: Org-src context but no existing split - create new split
+     ((and (buffer-live-p initial-buffer)
+           (string-match-p "\\*Org Src.*\\[" (buffer-name initial-buffer)))
+      (euporie-termint-debug-log 'info "Org-src context - creating new left/right split")
+      (delete-other-windows)
+      (set-window-buffer (selected-window) initial-buffer)
+      (let ((new-right-window (split-window-right)))
+        (set-window-buffer new-right-window buffer)
+        (with-selected-window new-right-window
+          (goto-char (point-max)))
+        ;; Stay in org-src buffer (left window)
+        (select-window initial-window)))
+     
+     ;; Case 3: Non org-src context - use standard display
+     (t
+      (euporie-termint-debug-log 'info "Non org-src context - using standard display")
       (let ((console-window (display-buffer buffer
                                             '((display-buffer-reuse-window
                                                display-buffer-in-side-window)
@@ -499,7 +541,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
             (select-window initial-window))
           
           (when (buffer-live-p initial-buffer)
-            (set-window-buffer (selected-window) initial-buffer)))))))
+            (set-window-buffer (selected-window) initial-buffer))))))))
 
 ;;; Graphics File Monitor for Stata
 
@@ -611,6 +653,57 @@ DIR parameter is used for SAS to determine local vs remote execution."
       ;; Return buffer for further processing if needed
       buffer)))
 
+;;; Helper Functions
+
+(defun euporie-termint--region-function-or-paragraph ()
+  "Extract region, function, or paragraph based on ESS logic.
+If region is active, return it. Otherwise try to find function,
+falling back to paragraph. Language-aware function detection."
+  (cond 
+   ((use-region-p)
+    (buffer-substring-no-properties (region-beginning) (region-end)))
+   ;; For SAS, use our SAS-specific function detection
+   ((or (eq major-mode 'SAS-mode) 
+        (string-match-p "sas" (or (bound-and-true-p org-src--lang) "")))
+    (condition-case nil
+        (euporie-termint--sas-function-at-point)
+      (error (thing-at-point 'paragraph t))))
+   ;; For R and other languages, use standard ESS approach
+   (t 
+    (condition-case nil
+        (euporie-termint--standard-function-at-point)
+      (error (thing-at-point 'paragraph t))))))
+
+(defun euporie-termint--sas-function-at-point ()
+  "Extract SAS procedure at point - looks for PROC/DATA statements."
+  (save-excursion
+    ;; Look backward for PROC or DATA statement
+    (while (and (not (bobp)) 
+                (not (looking-at "^\\s-*\\(proc\\|data\\)\\s-")))
+      (forward-line -1))
+    
+    (if (looking-at "^\\s-*\\(proc\\|data\\)\\s-")
+        ;; Found PROC/DATA, extract until RUN; or QUIT;
+        (let ((start (point)))
+          (while (and (not (eobp))
+                      (not (looking-at "^\\s-*\\(run\\|quit\\)\\s-*;")))
+            (forward-line 1))
+          ;; Include the RUN/QUIT line
+          (when (looking-at "^\\s-*\\(run\\|quit\\)\\s-*;")
+            (end-of-line))
+          (buffer-substring-no-properties start (point)))
+      ;; No PROC/DATA found, signal error to fall back to paragraph
+      (error "No SAS procedure found"))))
+
+(defun euporie-termint--standard-function-at-point ()
+  "Extract function using standard ESS approach with beginning/end-of-defun."
+  (save-excursion
+    (end-of-defun)
+    (beginning-of-defun)
+    (let ((start (point)))
+      (end-of-defun)
+      (buffer-substring-no-properties start (point)))))
+
 ;;; Main C-RET Integration Function
 
 (defun euporie-termint-send-region-or-line ()
@@ -632,8 +725,8 @@ DIR parameter is used for SAS to determine local vs remote execution."
                        (org-element-property :value element)
                      (thing-at-point 'line t))))
                 ((string-match-p "\\*Org Src.*\\[" (buffer-name))
-                 ;; In org-src edit buffer, get the entire buffer content
-                 (buffer-substring-no-properties (point-min) (point-max)))
+                 ;; In org-src edit buffer, use ESS-style region-function-paragraph logic
+                 (euporie-termint--region-function-or-paragraph))
                 (t
                  (thing-at-point 'line t)))))
     
