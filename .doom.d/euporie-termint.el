@@ -401,7 +401,14 @@ DIR parameter is used for SAS to determine local vs remote execution."
             (progn
               (euporie-termint-debug-log 'info "Remote SAS detected - using synchronous startup")
               ;; The remote function handles all timing internally
-              (get-buffer buffer-name))
+              (let ((created-buffer (get-buffer buffer-name)))
+                ;; Auto-associate with current org-src buffer if we're in one
+                (when (and created-buffer 
+                           (string-match-p "\\*Org Src.*\\[.*\\]\\*" (buffer-name)))
+                  (euporie-termint-associate-buffers (current-buffer) buffer-name)
+                  (euporie-termint-debug-log 'info "Auto-associated org-src buffer %s with %s (remote)" 
+                                           (buffer-name) buffer-name))
+                created-buffer))
           ;; For local/non-SAS, use standard async pattern
           (progn
             ;; Wait for buffer creation and kernel readiness  
@@ -416,7 +423,14 @@ DIR parameter is used for SAS to determine local vs remote execution."
               (when buffer
                 (sleep-for 2)  ; Simple 2-second wait instead of complex detection
                 (euporie-termint-debug-log 'info "Kernel initialization wait complete")))
-            (get-buffer buffer-name))))))))
+            (let ((created-buffer (get-buffer buffer-name)))
+              ;; Auto-associate with current org-src buffer if we're in one
+              (when (and created-buffer 
+                         (string-match-p "\\*Org Src.*\\[.*\\]\\*" (buffer-name)))
+                (euporie-termint-associate-buffers (current-buffer) buffer-name)
+                (euporie-termint-debug-log 'info "Auto-associated org-src buffer %s with %s" 
+                                         (buffer-name) buffer-name))
+              created-buffer))))))))
 
 ;;; Language Detection
 
@@ -599,7 +613,15 @@ This function uses ESS patterns but checks for existing console windows first."
 DIR parameter is used for SAS to determine local vs remote execution.
 If FORCE-EXECUTE is non-nil, send Ctrl+Enter to execute immediately."
   (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
-         (buffer (euporie-termint-get-or-create-buffer kernel dir))
+         ;; First try to get associated buffer, fall back to get-or-create
+         (associated-buffer (euporie-termint-get-associated-buffer))
+         (buffer (if associated-buffer
+                     (progn 
+                       (euporie-termint-debug-log 'info "Using associated buffer: %s" associated-buffer)
+                       (get-buffer associated-buffer))
+                   (progn
+                     (euporie-termint-debug-log 'info "No association found, creating/getting buffer for kernel: %s" kernel)
+                     (euporie-termint-get-or-create-buffer kernel dir))))
          (send-func (cond
                     ((string= kernel "python") #'termint-euporie-python-send-string)
                     ((string= kernel "r") #'termint-euporie-r-send-string)
@@ -663,12 +685,11 @@ falling back to paragraph. Language-aware function detection."
   (cond 
    ((use-region-p)
     (buffer-substring-no-properties (region-beginning) (region-end)))
-   ;; For SAS, use our SAS-specific function detection
+   ;; For SAS, skip function detection entirely and use paragraph
+   ;; This handles %MACRO, PROC, DATA, and other SAS constructs better
    ((or (eq major-mode 'SAS-mode) 
         (string-match-p "sas" (or (bound-and-true-p org-src--lang) "")))
-    (condition-case nil
-        (euporie-termint--sas-function-at-point)
-      (error (thing-at-point 'paragraph t))))
+    (thing-at-point 'paragraph t))
    ;; For R and other languages, use standard ESS approach
    (t 
     (condition-case nil
@@ -705,6 +726,58 @@ falling back to paragraph. Language-aware function detection."
       (end-of-defun)
       (buffer-substring-no-properties start (point)))))
 
+;;; Buffer Association System
+
+(defvar-local euporie-termint-associated-buffer nil
+  "Buffer-local variable storing the associated euporie console buffer for this org-src buffer.")
+
+(defun euporie-termint-associate-buffers (org-src-buffer euporie-buffer)
+  "Associate an org-src buffer with its corresponding euporie buffer."
+  (when (buffer-live-p org-src-buffer)
+    (with-current-buffer org-src-buffer
+      (setq-local euporie-termint-associated-buffer euporie-buffer)
+      (euporie-termint-debug-log 'info "Associated %s with %s" 
+                               (buffer-name org-src-buffer) euporie-buffer))))
+
+(defun euporie-termint-get-associated-buffer ()
+  "Get the associated euporie buffer for the current org-src buffer."
+  (if (and (boundp 'euporie-termint-associated-buffer)
+           euporie-termint-associated-buffer
+           (get-buffer euporie-termint-associated-buffer))
+      euporie-termint-associated-buffer
+    ;; Fallback to kernel detection if no association exists
+    (let* ((kernel (euporie-termint-detect-kernel))
+           (buffer-name (format "*euporie-%s*" kernel)))
+      (when (get-buffer buffer-name)
+        buffer-name))))
+
+;;; Buffer Reconnection Function
+
+(defun euporie-termint-reconnect-buffers ()
+  "Ensure termint buffer variables are connected to existing euporie buffers.
+This fixes the issue where C-RET stops working after opening vterm or other buffer operations."
+  (interactive)
+  
+  ;; List of kernel types and their corresponding buffer names
+  (let ((kernel-buffers '(("python" . "*euporie-python*")
+                         ("r" . "*euporie-r*")
+                         ("stata" . "*euporie-stata*")
+                         ("sas" . "*euporie-sas*"))))
+    
+    (dolist (kernel-buffer kernel-buffers)
+      (let* ((kernel (car kernel-buffer))
+             (buffer-name (cdr kernel-buffer))
+             (buffer-var-name (intern (format "termint-euporie-%s-buffer" kernel)))
+             (send-func-name (intern (format "termint-euporie-%s-send-string" kernel))))
+        
+        ;; If the buffer exists but the termint variable is nil, reconnect it
+        (when (and (get-buffer buffer-name)
+                   (or (not (boundp buffer-var-name))
+                       (not (symbol-value buffer-var-name))))
+          (set buffer-var-name buffer-name)
+          (euporie-termint-debug-log 'info "Reconnected %s buffer variable to %s" 
+                                   buffer-var-name buffer-name))))))
+
 ;;; Main C-RET Integration Function
 
 (defun euporie-termint-send-region-or-line ()
@@ -713,6 +786,10 @@ Always forces execution when no region is selected to ensure code runs immediate
   (interactive)
   
   (euporie-termint-debug-log 'info "=== C-RET pressed in buffer: %s ===" (buffer-name))
+  
+  ;; Ensure buffer variables are connected before proceeding
+  (euporie-termint-reconnect-buffers)
+  
   (let* ((kernel (euporie-termint-detect-kernel))
          ;; Extract :dir parameter from current context on-demand
          (extracted-dir (euporie-termint-extract-dir-from-current-context))
