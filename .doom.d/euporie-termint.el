@@ -89,19 +89,38 @@ If nil, the value of `split-height-threshold' is used."
 
 ;;; Kernel Management Functions
 
-(defun euporie-python-start ()
-  "Start Python euporie console with direnv handling."
+(defun euporie-python-start (&optional dir)
+  "Start Python euporie console with direnv handling.
+If DIR is provided and is a TRAMP path, start remote Python session.
+Otherwise start local Python session."
   (interactive)
-  (let* ((buffer-name "*euporie-python*")
+  (let* ((is-remote (and dir (file-remote-p dir)))
+         (buffer-name "*euporie-python*")
          (smart-cmd (euporie-termint--build-euporie-command "python3" euporie-termint-project-dir)))
     
-    (euporie-termint-debug-log 'info "Starting Python euporie console...")
-    (euporie-termint-debug-log 'info "Python command: %s" smart-cmd)
+    (euporie-termint-debug-log 'info "Starting %s Python euporie console in directory: %s" 
+                               (if is-remote "remote" "local") (or dir default-directory))
     
     ;; Kill any existing buffer first
     (when (get-buffer buffer-name)
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
+    
+    (if is-remote
+        (progn
+          (euporie-termint-debug-log 'info "Calling euporie-python-start-remote with dir: %s" dir)
+          (euporie-python-start-remote dir))
+      (progn
+        (euporie-termint-debug-log 'info "Calling euporie-python-start-local")
+        (euporie-python-start-local)))))
+
+(defun euporie-python-start-local ()
+  "Start local Python euporie console using termint."
+  (let* ((buffer-name "*euporie-python*")
+         (smart-cmd (euporie-termint--build-euporie-command "python3" euporie-termint-project-dir)))
+    
+    (euporie-termint-debug-log 'info "Starting local Python euporie console...")
+    (euporie-termint-debug-log 'info "Local Python command: %s" smart-cmd)
     
     ;; Define termint with proper environment for graphics and working directory
     (let ((default-directory euporie-termint-project-dir))
@@ -128,19 +147,38 @@ If nil, the value of `split-height-threshold' is used."
       (sleep-for 2)  ; Simple 2-second wait instead of complex detection
       (euporie-termint-debug-log 'info "Kernel initialization wait complete"))))
 
-(defun euporie-r-start ()
-  "Start R euporie console with direnv handling."
+(defun euporie-r-start (&optional dir)
+  "Start R euporie console with direnv handling.
+If DIR is provided and is a TRAMP path, start remote R session.
+Otherwise start local R session."
   (interactive)
-  (let* ((buffer-name "*euporie-r*")
+  (let* ((is-remote (and dir (file-remote-p dir)))
+         (buffer-name "*euporie-r*")
          (smart-cmd (euporie-termint--build-euporie-command "ir" euporie-termint-project-dir)))
     
-    (euporie-termint-debug-log 'info "Starting R euporie console...")
-    (euporie-termint-debug-log 'info "R command: %s" smart-cmd)
+    (euporie-termint-debug-log 'info "Starting %s R euporie console in directory: %s" 
+                               (if is-remote "remote" "local") (or dir default-directory))
     
     ;; Kill any existing buffer first
     (when (get-buffer buffer-name)
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
+    
+    (if is-remote
+        (progn
+          (euporie-termint-debug-log 'info "Calling euporie-r-start-remote with dir: %s" dir)
+          (euporie-r-start-remote dir))
+      (progn
+        (euporie-termint-debug-log 'info "Calling euporie-r-start-local")
+        (euporie-r-start-local)))))
+
+(defun euporie-r-start-local ()
+  "Start local R euporie console using termint."
+  (let* ((buffer-name "*euporie-r*")
+         (smart-cmd (euporie-termint--build-euporie-command "ir" euporie-termint-project-dir)))
+    
+    (euporie-termint-debug-log 'info "Starting local R euporie console...")
+    (euporie-termint-debug-log 'info "Local R command: %s" smart-cmd)
     
     ;; Define termint with proper environment for graphics and working directory
     (let ((default-directory euporie-termint-project-dir))
@@ -167,19 +205,38 @@ If nil, the value of `split-height-threshold' is used."
       (sleep-for 2)  ; Simple 2-second wait instead of complex detection
       (euporie-termint-debug-log 'info "Kernel initialization wait complete"))))
 
-(defun euporie-stata-start ()
-  "Start Stata euporie console with direnv handling and Stata-specific optimizations."
+(defun euporie-stata-start (&optional dir)
+  "Start Stata euporie console with direnv handling and Stata-specific optimizations.
+If DIR is provided and is a TRAMP path, start remote Stata session.
+Otherwise start local Stata session."
   (interactive)
-  (let* ((buffer-name "*euporie-stata*")
+  (let* ((is-remote (and dir (file-remote-p dir)))
+         (buffer-name "*euporie-stata*")
          (smart-cmd (euporie-termint--build-euporie-command "stata" euporie-termint-project-dir)))
     
-    (euporie-termint-debug-log 'info "Starting Stata euporie console with optimizations...")
-    (euporie-termint-debug-log 'info "Stata command: %s" smart-cmd)
+    (euporie-termint-debug-log 'info "Starting %s Stata euporie console with optimizations in directory: %s" 
+                               (if is-remote "remote" "local") (or dir default-directory))
     
     ;; Kill any existing buffer first
     (when (get-buffer buffer-name)
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buffer-name)))
+    
+    (if is-remote
+        (progn
+          (euporie-termint-debug-log 'info "Calling euporie-stata-start-remote with dir: %s" dir)
+          (euporie-stata-start-remote dir))
+      (progn
+        (euporie-termint-debug-log 'info "Calling euporie-stata-start-local")
+        (euporie-stata-start-local)))))
+
+(defun euporie-stata-start-local ()
+  "Start local Stata euporie console using termint."
+  (let* ((buffer-name "*euporie-stata*")
+         (smart-cmd (euporie-termint--build-euporie-command "stata" euporie-termint-project-dir)))
+    
+    (euporie-termint-debug-log 'info "Starting local Stata euporie console with optimizations...")
+    (euporie-termint-debug-log 'info "Local Stata command: %s" smart-cmd)
     
     ;; Define termint with Stata-specific environment optimizations and working directory
     (let ((default-directory euporie-termint-project-dir))
@@ -393,18 +450,190 @@ Otherwise start local SAS session."
           ;; Send second newline to ensure execution in euporie console
           (process-send-string proc "\n"))))))
 
+;; Global send functions for Python, R, and Stata (works for both local and remote)
+(defun termint-euporie-python-send-string (code)
+  "Send code to Python euporie console (works for both local and remote)."
+  (when (get-buffer "*euporie-python*")
+    (with-current-buffer "*euporie-python*"
+      (let ((proc (get-buffer-process "*euporie-python*")))
+        (when proc
+          (process-send-string proc code)
+          ;; Send second newline to ensure execution in euporie console
+          (process-send-string proc "\n"))))))
+
+(defun termint-euporie-r-send-string (code)
+  "Send code to R euporie console (works for both local and remote)."
+  (when (get-buffer "*euporie-r*")
+    (with-current-buffer "*euporie-r*"
+      (let ((proc (get-buffer-process "*euporie-r*")))
+        (when proc
+          (process-send-string proc code)
+          ;; Send second newline to ensure execution in euporie console
+          (process-send-string proc "\n"))))))
+
+(defun termint-euporie-stata-send-string (code)
+  "Send code to Stata euporie console (works for both local and remote)."
+  (when (get-buffer "*euporie-stata*")
+    (with-current-buffer "*euporie-stata*"
+      (let ((proc (get-buffer-process "*euporie-stata*")))
+        (when proc
+          (process-send-string proc code)
+          ;; Send second newline to ensure execution in euporie console
+          (process-send-string proc "\n"))))))
+
+;;; Remote Execution Functions
+
+;; Remote execution functions for Python, R, and Stata (following SAS pattern)
+(defun euporie-python-start-remote (remote-dir)
+  "Start remote Python euporie console using tramp-qrsh-with-custom-buffer."
+  (let* ((localname (if (file-remote-p remote-dir)
+                        (file-remote-p remote-dir 'localname)
+                      remote-dir)))
+    
+    (euporie-termint-debug-log 'info "=== euporie-python-start-remote called with dir: %s ===" remote-dir)
+    (euporie-termint-debug-log 'debug "Remote Python start - localname extracted: %s" localname)
+    
+    ;; Use tramp-qrsh-with-custom-buffer to get to compute node
+    (euporie-termint-debug-log 'info "Calling tramp-qrsh-with-custom-buffer to establish remote connection with buffer name: *euporie-python*")
+    (let ((wrds-buffer (tramp-qrsh-with-custom-buffer nil "*euporie-python*")))
+      
+      (if wrds-buffer
+          (progn
+            (euporie-termint-debug-log 'info "tramp-qrsh-with-custom-buffer returned buffer: %s" (buffer-name wrds-buffer))
+            (euporie-termint-debug-log 'debug "Using original buffer name: %s" (buffer-name wrds-buffer)))
+        (euporie-termint-debug-log 'error "tramp-qrsh-with-custom-buffer returned nil - no remote connection established"))
+      
+      (when wrds-buffer
+        ;; Send euporie command to the compute node shell with suppressed output
+        (let ((euporie-cmd (format "cd %s 2>/dev/null && exec %s" localname 
+                                  (euporie-termint--build-euporie-command "python" remote-dir))))
+          (euporie-termint-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
+          (with-current-buffer wrds-buffer
+            ;; Use termint send function (not comint)
+            (euporie-termint-debug-log 'debug "Sending euporie command to compute node via termint")
+            (if (fboundp 'termint-euporie-python-send-string)
+                (termint-euporie-python-send-string euporie-cmd)
+              (error "termint-euporie-python-send-string not available"))
+            (euporie-termint-debug-log 'info "Successfully sent euporie command to compute node")
+            
+            ;; Allow time for euporie console to start
+            (sleep-for 3)))  ; Brief delay for console startup
+        
+        ;; Display in split window using proper console display function
+        (euporie-termint-debug-log 'debug "Creating split window layout for remote Python console")
+        (euporie-termint-display-console-right wrds-buffer)
+        
+        wrds-buffer))))
+
+(defun euporie-r-start-remote (remote-dir)
+  "Start remote R euporie console using tramp-qrsh-with-custom-buffer."
+  (let* ((localname (if (file-remote-p remote-dir)
+                        (file-remote-p remote-dir 'localname)
+                      remote-dir)))
+    
+    (euporie-termint-debug-log 'info "=== euporie-r-start-remote called with dir: %s ===" remote-dir)
+    (euporie-termint-debug-log 'debug "Remote R start - localname extracted: %s" localname)
+    
+    ;; Use tramp-qrsh-with-custom-buffer to get to compute node
+    (euporie-termint-debug-log 'info "Calling tramp-qrsh-with-custom-buffer to establish remote connection with buffer name: *euporie-r*")
+    (let ((wrds-buffer (tramp-qrsh-with-custom-buffer nil "*euporie-r*")))
+      
+      (if wrds-buffer
+          (progn
+            (euporie-termint-debug-log 'info "tramp-qrsh-with-custom-buffer returned buffer: %s" (buffer-name wrds-buffer))
+            (euporie-termint-debug-log 'debug "Using original buffer name: %s" (buffer-name wrds-buffer)))
+        (euporie-termint-debug-log 'error "tramp-qrsh-with-custom-buffer returned nil - no remote connection established"))
+      
+      (when wrds-buffer
+        ;; Send euporie command to the compute node shell with suppressed output
+        (let ((euporie-cmd (format "cd %s 2>/dev/null && exec %s" localname 
+                                  (euporie-termint--build-euporie-command "r" remote-dir))))
+          (euporie-termint-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
+          (with-current-buffer wrds-buffer
+            ;; Use termint send function (not comint)
+            (euporie-termint-debug-log 'debug "Sending euporie command to compute node via termint")
+            (if (fboundp 'termint-euporie-r-send-string)
+                (termint-euporie-r-send-string euporie-cmd)
+              (error "termint-euporie-r-send-string not available"))
+            (euporie-termint-debug-log 'info "Successfully sent euporie command to compute node")
+            
+            ;; Allow time for euporie console to start
+            (sleep-for 3)))  ; Brief delay for console startup
+        
+        ;; Display in split window using proper console display function
+        (euporie-termint-debug-log 'debug "Creating split window layout for remote R console")
+        (euporie-termint-display-console-right wrds-buffer)
+        
+        wrds-buffer))))
+
+(defun euporie-stata-start-remote (remote-dir)
+  "Start remote Stata euporie console using tramp-qrsh-with-custom-buffer."
+  (let* ((localname (if (file-remote-p remote-dir)
+                        (file-remote-p remote-dir 'localname)
+                      remote-dir)))
+    
+    (euporie-termint-debug-log 'info "=== euporie-stata-start-remote called with dir: %s ===" remote-dir)
+    (euporie-termint-debug-log 'debug "Remote Stata start - localname extracted: %s" localname)
+    
+    ;; Use tramp-qrsh-with-custom-buffer to get to compute node
+    (euporie-termint-debug-log 'info "Calling tramp-qrsh-with-custom-buffer to establish remote connection with buffer name: *euporie-stata*")
+    (let ((wrds-buffer (tramp-qrsh-with-custom-buffer nil "*euporie-stata*")))
+      
+      (if wrds-buffer
+          (progn
+            (euporie-termint-debug-log 'info "tramp-qrsh-with-custom-buffer returned buffer: %s" (buffer-name wrds-buffer))
+            (euporie-termint-debug-log 'debug "Using original buffer name: %s" (buffer-name wrds-buffer)))
+        (euporie-termint-debug-log 'error "tramp-qrsh-with-custom-buffer returned nil - no remote connection established"))
+      
+      (when wrds-buffer
+        ;; Send euporie command to the compute node shell with suppressed output
+        (let ((euporie-cmd (format "cd %s 2>/dev/null && exec %s" localname 
+                                  (euporie-termint--build-euporie-command "stata" remote-dir))))
+          (euporie-termint-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
+          (with-current-buffer wrds-buffer
+            ;; Use termint send function (not comint)
+            (euporie-termint-debug-log 'debug "Sending euporie command to compute node via termint")
+            (if (fboundp 'termint-euporie-stata-send-string)
+                (termint-euporie-stata-send-string euporie-cmd)
+              (error "termint-euporie-stata-send-string not available"))
+            (euporie-termint-debug-log 'info "Successfully sent euporie command to compute node")
+            
+            ;; Allow time for euporie console to start
+            (sleep-for 3)))  ; Brief delay for console startup
+        
+        ;; Display in split window using proper console display function
+        (euporie-termint-debug-log 'debug "Creating split window layout for remote Stata console")
+        (euporie-termint-display-console-right wrds-buffer)
+        
+        wrds-buffer))))
+
 ;;; Buffer Management
 
 
 (defun euporie-termint-get-or-create-buffer (kernel &optional dir)
   "Get or create euporie termint buffer for KERNEL.
-DIR parameter is used for SAS to determine local vs remote execution."
-  (let* ((is-remote-sas (and (string= kernel "sas") dir (file-remote-p dir)))
+DIR parameter is used to determine local vs remote execution for all kernels."
+  (let* ((is-remote (and dir (file-remote-p dir)))
          (buffer-name (format "*euporie-%s*" kernel))
          (start-func (cond
-                     ((string= kernel "python") #'euporie-python-start)
-                     ((string= kernel "r") #'euporie-r-start)
-                     ((string= kernel "stata") #'euporie-stata-start)
+                     ((string= kernel "python") 
+                      (progn
+                        (euporie-termint-debug-log 'info "Creating Python start lambda with dir: %s" (or dir "nil"))
+                        (lambda () 
+                          (euporie-termint-debug-log 'info "Lambda called - about to call euporie-python-start with dir: %s" (or dir "nil"))
+                          (euporie-python-start dir))))
+                     ((string= kernel "r") 
+                      (progn
+                        (euporie-termint-debug-log 'info "Creating R start lambda with dir: %s" (or dir "nil"))
+                        (lambda () 
+                          (euporie-termint-debug-log 'info "Lambda called - about to call euporie-r-start with dir: %s" (or dir "nil"))
+                          (euporie-r-start dir))))
+                     ((string= kernel "stata") 
+                      (progn
+                        (euporie-termint-debug-log 'info "Creating Stata start lambda with dir: %s" (or dir "nil"))
+                        (lambda () 
+                          (euporie-termint-debug-log 'info "Lambda called - about to call euporie-stata-start with dir: %s" (or dir "nil"))
+                          (euporie-stata-start dir))))
                      ((string= kernel "sas") 
                       (progn
                         (euporie-termint-debug-log 'info "Creating SAS start lambda with dir: %s" (or dir "nil"))
@@ -419,15 +648,12 @@ DIR parameter is used for SAS to determine local vs remote execution."
                                   (buffer-live-p buffer)
                                   (get-buffer-process buffer)
                                   (process-live-p (get-buffer-process buffer))
-                                  ;; For SAS, check if buffer type matches execution type
-                                  (if (string= kernel "sas")
-                                      ;; Simple reuse: if buffer has live process, it's compatible
-                                      t
-                                    ;; For other kernels, existing buffer is always compatible
-                                    t))))
+                                  ;; Simple reuse: if buffer has live process, it's compatible
+                                  ;; All kernels now support both local and remote execution
+                                  t)))
       
-      (when (and (string= kernel "sas") buffer (not buffer-compatible))
-        (sas-workflow-debug-log 'info "Killing existing SAS buffer - execution type may have changed")
+      (when (and buffer (not buffer-compatible))
+        (euporie-termint-debug-log 'info "Killing existing %s buffer - process may have died" kernel)
         (let ((kill-buffer-query-functions nil))
           (kill-buffer buffer))
         (setq buffer nil))
@@ -438,7 +664,7 @@ DIR parameter is used for SAS to determine local vs remote execution."
         (progn
         (funcall start-func)
         ;; For remote SAS, use special synchronous handling
-        (if is-remote-sas
+        (if (and is-remote (string= kernel "sas"))
             (progn
               (euporie-termint-debug-log 'info "Remote SAS detected - using synchronous startup")
               ;; The remote function handles all timing internally
@@ -913,7 +1139,8 @@ Always forces execution when no region is selected to ensure code runs immediate
     
     (when code
       (euporie-termint-debug-log 'info "Executing %s code via euporie in dir: %s (force: %s)" kernel current-dir force-execution)
-      (if (and (string= kernel "sas") (file-remote-p current-dir))
+      ;; Pass dir parameter for any kernel with remote directory (not just SAS)
+      (if (file-remote-p current-dir)
           (euporie-termint-send-code kernel code current-dir force-execution)
         (euporie-termint-send-code kernel code nil force-execution)))))
 

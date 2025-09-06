@@ -7,49 +7,68 @@ set -e
 
 # Test configuration
 LANGUAGES=("python" "r" "sas")
-declare -A LANGUAGE_PATTERNS=(
-    ["python"]="Python Remote Execution Test"
-    ["r"]="R Remote Execution Test" 
-    ["sas"]="SAS Remote Test"
-)
-declare -A LANGUAGE_BLOCKS=(
-    ["python"]="Python Test Block (Remote)"
-    ["r"]="R Test Block (Remote)"
-    ["sas"]="SAS Test Block"
-)
-# Username patterns to detect remote vs local execution
-declare -A REMOTE_USERNAME_PATTERNS=(
-    ["python"]="Username: eddyhu"
-    ["r"]="Username: eddyhu"
-    ["sas"]="User: eddyhu"
-)
-declare -A LOCAL_USERNAME_PATTERNS=(
-    ["python"]="Username: vwh7mb"
-    ["r"]="Username: vwh7mb"
-    ["sas"]="User: vwh7mb"
-)
-declare -A SUCCESS_PATTERNS=(
-    ["python"]="SUCCESS: Running on WRDS remote server"
-    ["r"]="SUCCESS: Running on WRDS remote server"
-    ["sas"]="SUCCESS: Running on WRDS remote server"
-)
-declare -A FAILURE_PATTERNS=(
-    ["python"]="FAILURE: Running locally as vwh7mb"
-    ["r"]="FAILURE: Running locally as.*vwh7mb"
-    ["sas"]="FAILURE: Running locally as.*vwh7mb"
-)
+
+# Function to get language patterns (replacement for associative arrays)
+get_language_pattern() {
+    case "$1" in
+        "python") echo "Python Remote Execution Test" ;;
+        "r") echo "R Remote Execution Test" ;;
+        "sas") echo "SAS Remote Test" ;;
+    esac
+}
+
+get_language_block() {
+    case "$1" in
+        "python") echo "Python Test Block (Remote)" ;;
+        "r") echo "R Test Block (Remote)" ;;
+        "sas") echo "SAS Test Block" ;;
+    esac
+}
+
+get_remote_username_pattern() {
+    case "$1" in
+        "python") echo "Username: eddyhu" ;;
+        "r") echo "Username: eddyhu" ;;
+        "sas") echo "User: eddyhu" ;;
+    esac
+}
+
+get_local_username_pattern() {
+    case "$1" in
+        "python") echo "Username: vwh7mb" ;;
+        "r") echo "Username: vwh7mb" ;;
+        "sas") echo "User: vwh7mb" ;;
+    esac
+}
+
+get_success_pattern() {
+    case "$1" in
+        "python") echo "SUCCESS: Running on WRDS remote server" ;;
+        "r") echo "SUCCESS: Running on WRDS remote server" ;;
+        "sas") echo "SUCCESS: Running on WRDS remote server" ;;
+    esac
+}
+
+get_failure_pattern() {
+    case "$1" in
+        "python") echo "FAILURE: Running locally as vwh7mb" ;;
+        "r") echo "FAILURE: Running locally as.*vwh7mb" ;;
+        "sas") echo "FAILURE: Running locally as.*vwh7mb" ;;
+    esac
+}
 
 # Timing variables
 TEST_START_TIME=$(date +%s.%3N)
-declare -A PHASE_START_TIMES
-declare -A PHASE_END_TIMES
 PHASES=("Emacs_Startup" "Python_Execution" "R_Execution" "SAS_Execution")
+
+# Timing storage using files instead of associative arrays
+mkdir -p /tmp/test-timing
 
 # Function to record phase start time
 record_phase_start() {
     local phase_name="$1"
     local timestamp=$(date +%s.%3N)
-    PHASE_START_TIMES["$phase_name"]=$timestamp
+    echo "$timestamp" > "/tmp/test-timing/${phase_name}_start"
     echo "[TIMING] $phase_name phase started at $(date)"
 }
 
@@ -57,7 +76,7 @@ record_phase_start() {
 record_phase_end() {
     local phase_name="$1"
     local timestamp=$(date +%s.%3N)
-    PHASE_END_TIMES["$phase_name"]=$timestamp
+    echo "$timestamp" > "/tmp/test-timing/${phase_name}_end"
     echo "[TIMING] $phase_name phase completed at $(date)"
 }
 
@@ -104,22 +123,29 @@ parse_log_timing() {
 # Function to calculate phase duration
 calculate_phase_duration() {
     local phase_name="$1"
-    local start="${PHASE_START_TIMES[$phase_name]}"
-    local end="${PHASE_END_TIMES[$phase_name]}"
+    local start_file="/tmp/test-timing/${phase_name}_start"
+    local end_file="/tmp/test-timing/${phase_name}_end"
     
-    if [ -n "$start" ] && [ -n "$end" ]; then
+    if [ -f "$start_file" ] && [ -f "$end_file" ]; then
+        local start=$(cat "$start_file")
+        local end=$(cat "$end_file")
         echo "$end - $start" | bc -l 2>/dev/null || echo "0"
     else
         echo "N/A"
     fi
 }
 
+# Function to capitalize first letter (compatible with macOS bash)
+capitalize_first() {
+    echo "$(tr '[:lower:]' '[:upper:]' <<< "${1:0:1}")${1:1}"
+}
+
 # Function to test language execution
 test_language_execution() {
     local language="$1"
-    local language_title="${language^}"  # Capitalize first letter
-    local block_pattern="${LANGUAGE_BLOCKS[$language]}"
-    local output_pattern="${LANGUAGE_PATTERNS[$language]}"
+    local language_title=$(capitalize_first "$language")
+    local block_pattern=$(get_language_block "$language")
+    local output_pattern=$(get_language_pattern "$language")
     
     echo "=== Testing $language_title Language ==="
     
@@ -221,10 +247,10 @@ test_language_execution() {
     # Check for output AND username verification
     echo "Step: Checking for $language_title output and username verification..."
     local output_success
-    local remote_pattern="${REMOTE_USERNAME_PATTERNS[$language]}"
-    local local_pattern="${LOCAL_USERNAME_PATTERNS[$language]}"
-    local success_pattern="${SUCCESS_PATTERNS[$language]}"
-    local failure_pattern="${FAILURE_PATTERNS[$language]}"
+    local remote_pattern=$(get_remote_username_pattern "$language")
+    local local_pattern=$(get_local_username_pattern "$language")
+    local success_pattern=$(get_success_pattern "$language")
+    local failure_pattern=$(get_failure_pattern "$language")
     
     output_success=$(emacsclient --eval "(progn
       (message \"=== TEST: Checking $language_title euporie buffer for output ===\")
@@ -268,12 +294,12 @@ test_language_execution() {
     local script_duration
     script_duration=$(calculate_phase_duration "${language_title}_Execution")
     
-    # Store results for summary
-    declare -gA LANGUAGE_RESULTS
-    LANGUAGE_RESULTS["${language}_output"]=$output_success
-    LANGUAGE_RESULTS["${language}_window"]=$window_split_success
-    LANGUAGE_RESULTS["${language}_timing"]="$log_times"
-    LANGUAGE_RESULTS["${language}_duration"]="$script_duration"
+    # Store results for summary using files
+    mkdir -p /tmp/test-results
+    echo "$output_success" > "/tmp/test-results/${language}_output"
+    echo "$window_split_success" > "/tmp/test-results/${language}_window"
+    echo "$log_times" > "/tmp/test-results/${language}_timing"
+    echo "$script_duration" > "/tmp/test-results/${language}_duration"
     
     echo "✓ $language_title test phase completed"
     echo ""
@@ -285,9 +311,9 @@ analyze_multi_language_timing() {
     echo "=== MULTI-LANGUAGE TIMING ANALYSIS ==="
     
     for language in "${LANGUAGES[@]}"; do
-        local language_title="${language^}"
-        local log_times=(${LANGUAGE_RESULTS["${language}_timing"]})
-        local script_duration="${LANGUAGE_RESULTS["${language}_duration"]}"
+        local language_title=$(capitalize_first "$language")
+        local log_times=($(cat "/tmp/test-results/${language}_timing" 2>/dev/null || echo "N/A N/A N/A"))
+        local script_duration=$(cat "/tmp/test-results/${language}_duration" 2>/dev/null || echo "N/A")
         
         echo ""
         echo "--- $language_title Timing ---"
@@ -307,8 +333,8 @@ analyze_multi_language_timing() {
     echo "- Language comparison (kernel startup times):"
     
     for language in "${LANGUAGES[@]}"; do
-        local language_title="${language^}"
-        local log_times=(${LANGUAGE_RESULTS["${language}_timing"]})
+        local language_title=$(capitalize_first "$language")
+        local log_times=($(cat "/tmp/test-results/${language}_timing" 2>/dev/null || echo "N/A N/A N/A"))
         local kernel_time="${log_times[2]}"
         if [ "$kernel_time" != "N/A" ]; then
             printf "  %-10s %s seconds\n" "$language_title:" "$kernel_time"
@@ -327,10 +353,10 @@ analyze_multi_language_timing() {
 check_remote_execution_logs() {
     echo "Step: Analyzing logs and buffers for remote execution across all languages..."
     
-    declare -gA REMOTE_RESULTS
+    mkdir -p /tmp/remote-results
     
     for language in "${LANGUAGES[@]}"; do
-        local language_title="${language^}"
+        local language_title=$(capitalize_first "$language")
         
         # Check for remote execution indicators in logs
         local remote_detected=false
@@ -367,10 +393,10 @@ check_remote_execution_logs() {
         local buffer_success=false
         local buffer_failure=false
         
-        local remote_pattern="${REMOTE_USERNAME_PATTERNS[$language]}"
-        local local_pattern="${LOCAL_USERNAME_PATTERNS[$language]}"
-        local success_pattern="${SUCCESS_PATTERNS[$language]}"
-        local failure_pattern="${FAILURE_PATTERNS[$language]}"
+        local remote_pattern=$(get_remote_username_pattern "$language")
+        local local_pattern=$(get_local_username_pattern "$language")
+        local success_pattern=$(get_success_pattern "$language")
+        local failure_pattern=$(get_failure_pattern "$language")
         
         # Check actual buffer content for username patterns
         local buffer_content
@@ -391,13 +417,13 @@ check_remote_execution_logs() {
             buffer_failure=true
         fi
         
-        REMOTE_RESULTS["${language}_remote"]=$remote_detected
-        REMOTE_RESULTS["${language}_local_avoided"]=$([ "$local_detected" = false ] && echo true || echo false)
-        REMOTE_RESULTS["${language}_hook"]=$hook_success
-        REMOTE_RESULTS["${language}_buffer_remote_user"]=$buffer_remote_user
-        REMOTE_RESULTS["${language}_buffer_local_user"]=$buffer_local_user
-        REMOTE_RESULTS["${language}_buffer_success"]=$buffer_success
-        REMOTE_RESULTS["${language}_buffer_failure"]=$buffer_failure
+        echo "$remote_detected" > "/tmp/remote-results/${language}_remote"
+        echo "$([ "$local_detected" = false ] && echo true || echo false)" > "/tmp/remote-results/${language}_local_avoided"
+        echo "$hook_success" > "/tmp/remote-results/${language}_hook"
+        echo "$buffer_remote_user" > "/tmp/remote-results/${language}_buffer_remote_user"
+        echo "$buffer_local_user" > "/tmp/remote-results/${language}_buffer_local_user"
+        echo "$buffer_success" > "/tmp/remote-results/${language}_buffer_success"
+        echo "$buffer_failure" > "/tmp/remote-results/${language}_buffer_failure"
         
         echo "- $language_title Log Analysis:"
         echo "  - Remote detected: $remote_detected"
@@ -416,9 +442,8 @@ echo "=== Multi-Language Euporie C-RET :dir Parameter Test ==="
 echo "$(date): Starting automated test for Python, R, and SAS"
 echo "Testing languages: ${LANGUAGES[*]}"
 
-# Initialize results storage
-declare -A LANGUAGE_RESULTS
-declare -A REMOTE_RESULTS
+# Initialize results storage using temporary directories
+rm -rf /tmp/test-results /tmp/remote-results 2>/dev/null || true
 
 # Step 1: Kill existing Emacs processes
 echo "Step 1: Killing existing Emacs processes..."
@@ -475,16 +500,16 @@ echo "Timestamp: $(date)"
 # Check overall success criteria with enhanced username verification
 all_success=true
 for language in "${LANGUAGES[@]}"; do
-    local language_title="${language^}"
-    local output_success="${LANGUAGE_RESULTS["${language}_output"]}"
-    local window_success="${LANGUAGE_RESULTS["${language}_window"]}"
-    local remote_success="${REMOTE_RESULTS["${language}_remote"]}"
-    local hook_success="${REMOTE_RESULTS["${language}_hook"]}"
-    local local_avoided="${REMOTE_RESULTS["${language}_local_avoided"]}"
-    local buffer_remote_user="${REMOTE_RESULTS["${language}_buffer_remote_user"]}"
-    local buffer_local_user="${REMOTE_RESULTS["${language}_buffer_local_user"]}"
-    local buffer_success="${REMOTE_RESULTS["${language}_buffer_success"]}"
-    local buffer_failure="${REMOTE_RESULTS["${language}_buffer_failure"]}"
+    local language_title=$(capitalize_first "$language")
+    local output_success=$(cat "/tmp/test-results/${language}_output" 2>/dev/null || echo "nil")
+    local window_success=$(cat "/tmp/test-results/${language}_window" 2>/dev/null || echo "nil")
+    local remote_success=$(cat "/tmp/remote-results/${language}_remote" 2>/dev/null || echo "false")
+    local hook_success=$(cat "/tmp/remote-results/${language}_hook" 2>/dev/null || echo "false")
+    local local_avoided=$(cat "/tmp/remote-results/${language}_local_avoided" 2>/dev/null || echo "false")
+    local buffer_remote_user=$(cat "/tmp/remote-results/${language}_buffer_remote_user" 2>/dev/null || echo "false")
+    local buffer_local_user=$(cat "/tmp/remote-results/${language}_buffer_local_user" 2>/dev/null || echo "true")
+    local buffer_success=$(cat "/tmp/remote-results/${language}_buffer_success" 2>/dev/null || echo "false")
+    local buffer_failure=$(cat "/tmp/remote-results/${language}_buffer_failure" 2>/dev/null || echo "true")
     
     echo ""
     echo "--- $language_title Results ---"
