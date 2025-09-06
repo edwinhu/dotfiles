@@ -54,7 +54,7 @@ If nil, the value of `split-height-threshold' is used."
   :group 'euporie-termint
   :type '(choice (const nil) (integer)))
 
-(defvar euporie-termint-debug-log-file (expand-file-name "euporie-debug.log" "~/")
+(defvar euporie-termint-debug-log-file (expand-file-name "euporie-termint-debug.log" "~/")
   "Log file for euporie debugging information.")
 (defvar sas-workflow-debug-log-file (expand-file-name "sas-workflow-debug.log" "~/")
   "Log file for SAS workflow debugging information.")
@@ -533,59 +533,110 @@ DIR parameter is used for SAS to determine local vs remote execution."
 
 (defun euporie-termint-display-console-right (buffer &optional original-buffer original-window)
   "Display console BUFFER in a right split window using ESS-style window management with reuse.
-This function uses ESS patterns but checks for existing console windows first."
-  (let ((initial-window (or original-window (selected-window)))
-        (initial-buffer (or original-buffer (current-buffer)))
-        (console-window (get-buffer-window buffer 'visible)))
-    
-    (euporie-termint-debug-log 'info "ESS-style window display: buffer=%s from=%s console-window-exists=%s" 
-                               (buffer-name buffer) (buffer-name initial-buffer) 
-                               (if console-window "yes" "no"))
-    
-    ;; Save selected window to restore focus later (ESS pattern)
-    (save-selected-window
-      (cond
-       ;; Case 1: Console window already visible - just switch to it and scroll
-       (console-window
-        (euporie-termint-debug-log 'info "Reusing existing console window")
-        (with-selected-window console-window
-          (goto-char (point-max))))
-       
-       ;; Case 2: Need to create window - use ESS split-window-sensibly approach
-       (t
-        (let* ((split-width-threshold (or euporie-termint-width-threshold
-                                          split-width-threshold))   ; ESS customizable threshold
-               (split-height-threshold (or euporie-termint-height-threshold
-                                           split-height-threshold))  ; ESS customizable threshold  
-               (win (split-window-sensibly (selected-window))))         ; ESS split-window-sensibly
-          
-          (if win
+This function uses ESS patterns but handles cases where original buffer may no longer exist."
+  (condition-case err
+      (let* ((initial-window (or original-window (selected-window)))
+             (initial-buffer (or original-buffer (current-buffer)))
+             (console-window (get-buffer-window buffer 'visible))
+             ;; Check if initial buffer is still valid
+             (initial-buffer-valid (and initial-buffer (buffer-live-p initial-buffer)))
+             (initial-window-valid (and initial-window (window-live-p initial-window))))
+        
+        (euporie-termint-debug-log 'info "ESS-style window display: buffer=%s from=%s console-window-exists=%s" 
+                                   (buffer-name buffer) 
+                                   (if initial-buffer-valid (buffer-name initial-buffer) "<dead-buffer>")
+                                   (if console-window "yes" "no"))
+        
+        ;; Save selected window to restore focus later (ESS pattern)
+        (save-selected-window
+          (cond
+           ;; Case 1: Console window already visible - just switch to it and scroll
+           (console-window
+            (euporie-termint-debug-log 'info "Reusing existing console window")
+            (with-selected-window console-window
+              (goto-char (point-max))))
+           
+           ;; Case 2: Need to create window - use ESS split-window-sensibly approach
+           (t
+            (let* ((split-width-threshold (or euporie-termint-width-threshold
+                                              split-width-threshold))
+                   (split-height-threshold (or euporie-termint-height-threshold
+                                               split-height-threshold))
+                   (win (condition-case split-err
+                            (split-window-sensibly (selected-window))
+                          (error 
+                           (euporie-termint-debug-log 'warn "split-window-sensibly failed: %s" split-err)
+                           nil))))
+              
+              (if win
+                  (progn
+                    (euporie-termint-debug-log 'info "ESS-style split succeeded - using new window")
+                    (set-window-buffer win buffer)
+                    (with-selected-window win
+                      (goto-char (point-max))))
+                
+                ;; Fallback: use pop-to-buffer with reuse-window priority (ESS pattern)
+                (let ((console-window-fallback (pop-to-buffer buffer 
+                                                               '((display-buffer-reuse-window
+                                                                  display-buffer-in-side-window
+                                                                  display-buffer-pop-up-window)
+                                                                 (side . right)
+                                                                 (window-width . 0.5)
+                                                                 (inhibit-same-window . t)))))
+                  (euporie-termint-debug-log 'info "ESS-style split failed - using pop-to-buffer fallback")
+                  (when console-window-fallback
+                    (with-selected-window console-window-fallback
+                      (goto-char (point-max))))))))))
+        
+        ;; Enhanced fallback if pop-to-buffer also fails
+        (unless (get-buffer-window buffer 'visible)
+          (euporie-termint-debug-log 'warn "All window splitting methods failed, using switch-to-buffer-other-window")
+          (condition-case switch-err
               (progn
-                (euporie-termint-debug-log 'info "ESS-style split succeeded - using new window")
-                (set-window-buffer win buffer)
-                (with-selected-window win
-                  (goto-char (point-max))))
-            
-            ;; Fallback: use pop-to-buffer with reuse-window priority (ESS pattern)
-            (progn
-              (euporie-termint-debug-log 'info "ESS-style split failed - using pop-to-buffer fallback")
-              (let ((console-window (pop-to-buffer buffer 
-                                                   '((display-buffer-reuse-window
-                                                      display-buffer-in-side-window)
-                                                     (side . right)
-                                                     (window-width . 0.5)
-                                                     (inhibit-same-window . t)))))
-                (when console-window
-                  (with-selected-window console-window
-                    (goto-char (point-max)))))))))))
+                (switch-to-buffer-other-window buffer)
+                (goto-char (point-max)))
+            (error 
+             (euporie-termint-debug-log 'error "switch-to-buffer-other-window failed: %s" switch-err)
+             ;; Last resort - just display in current window
+             (switch-to-buffer buffer)
+             (goto-char (point-max)))))
+        
+        ;; Robust window/buffer restoration
+        (cond
+         ;; Best case: both window and buffer are still valid
+         ((and initial-window-valid initial-buffer-valid)
+          (euporie-termint-debug-log 'debug "Restoring to original window and buffer")
+          (select-window initial-window)
+          (unless (eq (current-buffer) initial-buffer)
+            (set-buffer initial-buffer)))
+         
+         ;; Window valid but buffer gone - stay in window but don't set buffer
+         (initial-window-valid
+          (euporie-termint-debug-log 'debug "Restoring to original window (buffer no longer available)")
+          (select-window initial-window))
+         
+         ;; Neither valid - find a reasonable window to focus
+         (t
+          (euporie-termint-debug-log 'debug "Original window/buffer gone - finding reasonable focus target")
+          (let ((other-window (get-buffer-window buffer 'visible)))
+            (if other-window
+                (select-window other-window)
+              ;; Fallback to any available window that's not the console
+              (let ((available-windows (remove (get-buffer-window buffer 'visible) (window-list))))
+                (when available-windows
+                  (select-window (car available-windows))))))))
+        
+        (euporie-termint-debug-log 'info "ESS-style window display completed - focus handled robustly"))
     
-    ;; Ensure we return to the original buffer context (code/org-src stays on left)
-    (when (and (window-live-p initial-window) (buffer-live-p initial-buffer))
-      (select-window initial-window)
-      (unless (eq (current-buffer) initial-buffer)
-        (set-buffer initial-buffer)))
-    
-    (euporie-termint-debug-log 'info "ESS-style window display completed - focus restored")))
+    (error
+     (euporie-termint-debug-log 'error "euporie-termint-display-console-right failed: %s" err)
+     ;; Emergency fallback - just switch to the buffer
+     (condition-case fallback-err
+         (progn
+           (switch-to-buffer buffer)
+           (goto-char (point-max)))
+       (error 
+        (euporie-termint-debug-log 'error "Emergency fallback failed: %s" fallback-err))))))
 
 ;;; Graphics File Monitor for Stata
 
