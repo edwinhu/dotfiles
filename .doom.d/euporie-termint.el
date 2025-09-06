@@ -840,11 +840,25 @@ This function uses ESS patterns but handles cases where original buffer may no l
              (switch-to-buffer buffer)
              (goto-char (point-max)))))
         
-        ;; Robust window/buffer restoration
+        ;; Robust window/buffer restoration with split layout preservation
         (cond
          ;; Best case: both window and buffer are still valid
          ((and initial-window-valid initial-buffer-valid)
           (euporie-termint-debug-log 'debug "Restoring to original window and buffer")
+          ;; Ensure split layout is preserved - org-src LEFT, console RIGHT
+          (let ((console-window (get-buffer-window buffer 'visible))
+                (all-windows (window-list)))
+            (when (and console-window (> (length all-windows) 1))
+              ;; Sort windows by left edge position to ensure proper left/right ordering
+              (let* ((sorted-windows (sort all-windows (lambda (w1 w2) 
+                                                         (< (car (window-edges w1)) 
+                                                            (car (window-edges w2))))))
+                     (left-window (car sorted-windows))
+                     (right-window (cadr sorted-windows)))
+                ;; Ensure org-src is in LEFT window, console is in RIGHT window
+                (set-window-buffer left-window initial-buffer)
+                (set-window-buffer right-window buffer)
+                (euporie-termint-debug-log 'debug "Corrected split: org-src in left window, console in right window"))))
           (select-window initial-window)
           (unless (eq (current-buffer) initial-buffer)
             (set-buffer initial-buffer)))
