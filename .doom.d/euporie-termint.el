@@ -440,46 +440,10 @@ Otherwise start local SAS session."
 ;;; Send Functions
 
 ;; Global send function for SAS (works for both local and remote)
-(defun termint-euporie-sas-send-string (code)
-  "Send code to SAS euporie console (works for both local and remote)."
-  (when (get-buffer "*euporie-sas*")
-    (with-current-buffer "*euporie-sas*"
-      (let ((proc (get-buffer-process "*euporie-sas*")))
-        (when proc
-          (process-send-string proc code)
-          ;; Send second newline to ensure execution in euporie console
-          (process-send-string proc "\n"))))))
 
-;; Global send functions for Python, R, and Stata (works for both local and remote)
-(defun termint-euporie-python-send-string (code)
-  "Send code to Python euporie console (works for both local and remote)."
-  (when (get-buffer "*euporie-python*")
-    (with-current-buffer "*euporie-python*"
-      (let ((proc (get-buffer-process "*euporie-python*")))
-        (when proc
-          (process-send-string proc code)
-          ;; Send second newline to ensure execution in euporie console
-          (process-send-string proc "\n"))))))
+;; Send functions are automatically created by termint-define with bracketed paste support
+;; No custom send functions needed - termint handles bracketed paste automatically
 
-(defun termint-euporie-r-send-string (code)
-  "Send code to R euporie console (works for both local and remote)."
-  (when (get-buffer "*euporie-r*")
-    (with-current-buffer "*euporie-r*"
-      (let ((proc (get-buffer-process "*euporie-r*")))
-        (when proc
-          (process-send-string proc code)
-          ;; Send second newline to ensure execution in euporie console
-          (process-send-string proc "\n"))))))
-
-(defun termint-euporie-stata-send-string (code)
-  "Send code to Stata euporie console (works for both local and remote)."
-  (when (get-buffer "*euporie-stata*")
-    (with-current-buffer "*euporie-stata*"
-      (let ((proc (get-buffer-process "*euporie-stata*")))
-        (when proc
-          (process-send-string proc code)
-          ;; Send second newline to ensure execution in euporie console
-          (process-send-string proc "\n"))))))
 
 ;;; Remote Execution Functions
 
@@ -1039,11 +1003,18 @@ falling back to paragraph. Language-aware function detection."
    ((or (eq major-mode 'SAS-mode) 
         (string-match-p "sas" (or (bound-and-true-p org-src--lang) "")))
     (thing-at-point 'paragraph t))
-   ;; For R and other languages, use standard ESS approach
+   ;; For Python, R and other languages, prefer paragraph for script-like code
    (t 
-    (condition-case nil
-        (euporie-termint--standard-function-at-point)
-      (error (thing-at-point 'paragraph t))))))
+    (let ((func-result (condition-case nil
+                           (euporie-termint--standard-function-at-point)
+                         (error nil)))
+          (para-result (thing-at-point 'paragraph t)))
+      ;; If function detection returns very little compared to paragraph, use paragraph
+      ;; This handles script-like code better than function-focused extraction
+      (if (and func-result para-result 
+               (> (length para-result) (* 2 (length func-result))))
+          para-result
+        (or func-result para-result))))))
 
 (defun euporie-termint--sas-function-at-point ()
   "Extract SAS procedure at point - looks for PROC/DATA statements."
