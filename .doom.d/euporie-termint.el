@@ -506,7 +506,7 @@ Otherwise start local SAS session."
       (when wrds-buffer
         ;; Send euporie command to the compute node shell with suppressed output
         (let ((euporie-cmd (format "cd %s 2>/dev/null && exec %s" localname 
-                                  (euporie-termint--build-euporie-command "python" remote-dir))))
+                                  (euporie-termint--build-euporie-command "python3" remote-dir))))
           (euporie-termint-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
           (with-current-buffer wrds-buffer
             ;; Use termint send function (not comint)
@@ -547,7 +547,7 @@ Otherwise start local SAS session."
       (when wrds-buffer
         ;; Send euporie command to the compute node shell with suppressed output
         (let ((euporie-cmd (format "cd %s 2>/dev/null && exec %s" localname 
-                                  (euporie-termint--build-euporie-command "r" remote-dir))))
+                                  (euporie-termint--build-euporie-command "ir" remote-dir))))
           (euporie-termint-debug-log 'info "Preparing euporie command: %s" euporie-cmd)
           (with-current-buffer wrds-buffer
             ;; Use termint send function (not comint)
@@ -1114,7 +1114,7 @@ Always forces execution when no region is selected to ensure code runs immediate
   
   (let* ((kernel (euporie-termint-detect-kernel))
          ;; Extract :dir parameter from current context on-demand
-         (extracted-dir (euporie-termint-extract-dir-from-current-context))
+         (extracted-dir (euporie-termint-get-current-block-dir))
          (current-dir (or extracted-dir default-directory))
          (has-region (use-region-p))
          (code (cond
@@ -1189,64 +1189,66 @@ Supports remote execution via :dir parameter."
 
 ;;; Hook Functions
 
-(defun euporie-termint-extract-dir-from-current-context ()
-  "Extract :dir parameter from current org-src context using multiple strategies."
-  (euporie-termint-debug-log 'debug "=== Extracting :dir from current context ===")
+(defun euporie-termint-get-current-block-dir ()
+  "Get :dir from current org-babel src block using standard org-babel function.
+Uses multiple fallback strategies to handle cases where markers aren't available."
+  (euporie-termint-debug-log 'debug "=== Getting :dir from current src block ===")
   (euporie-termint-debug-log 'debug "Buffer name: %s" (buffer-name))
   
   (let ((extracted-dir nil))
     
-    ;; Strategy 1: Try org-src markers if available and valid
-    (when (and (string-match "\\*Org Src.*\\[" (buffer-name))
-               (boundp 'org-src--beg-marker) 
-               org-src--beg-marker)
-      (euporie-termint-debug-log 'debug "Strategy 1: Trying org-src markers")
-      (euporie-termint-debug-log 'debug "  Marker: %s" org-src--beg-marker)
-      (euporie-termint-debug-log 'debug "  Marker buffer: %s" (marker-buffer org-src--beg-marker))
-      
-      (when (and (markerp org-src--beg-marker)
-                 (marker-buffer org-src--beg-marker)
-                 (buffer-live-p (marker-buffer org-src--beg-marker))
-                 (marker-position org-src--beg-marker))
-        (condition-case err
-            (with-current-buffer (marker-buffer org-src--beg-marker)
-              (save-excursion
-                (goto-char (marker-position org-src--beg-marker))
-                (let* ((element (org-element-at-point))
-                       (params (org-babel-parse-header-arguments
-                               (or (org-element-property :parameters element) "")))
-                       (dir (cdr (assoc :dir params))))
-                  (euporie-termint-debug-log 'debug "  Strategy 1 - Element: %s" element)
-                  (euporie-termint-debug-log 'debug "  Strategy 1 - Parsed params: %s" params)
-                  (euporie-termint-debug-log 'debug "  Strategy 1 - Extracted dir: %s" dir)
-                  (setq extracted-dir dir))))
-          (error 
-           (euporie-termint-debug-log 'debug "  Strategy 1 failed: %s" err)))))
-    
-    ;; Strategy 2: Search for org buffers with matching src block if Strategy 1 failed
-    (when (and (not extracted-dir)
-               (string-match "\\*Org Src.*\\[ \\(.+\\) \\]\\*" (buffer-name)))
-      (euporie-termint-debug-log 'debug "Strategy 2: Searching org buffers for matching src block")
-      (let ((lang (match-string 1 (buffer-name)))
-            (src-content (buffer-substring-no-properties (point-min) (min 100 (point-max)))))
-        (euporie-termint-debug-log 'debug "  Looking for language: %s" lang)
-        (euporie-termint-debug-log 'debug "  Content snippet: %s" (substring src-content 0 (min 50 (length src-content))))
+    (cond
+     ;; Case 1: In org-src edit buffer - try marker first, then fallback
+     ((string-match "\\*Org Src.*\\[\\s-*\\(.+?\\)\\s-*\\]\\*" (buffer-name))
+      (let ((lang (match-string 1 (buffer-name))))
+        (euporie-termint-debug-log 'debug "In org-src buffer for language: %s" lang)
         
-        (dolist (buffer (buffer-list))
-          (when (and (not extracted-dir)
-                     (with-current-buffer buffer (eq major-mode 'org-mode)))
-            (condition-case err
-                (with-current-buffer buffer
-                  (save-excursion
-                    (goto-char (point-min))
-                    ;; Search for src blocks with :dir parameter
-                    (while (and (not extracted-dir)
-                                (re-search-forward (format "^[ \t]*#\\+begin_src[ \t]+%s\\>.*:dir[ \t]+\\([^ \t\n]+\\)" lang) nil t))
-                      (let ((found-dir (match-string 1)))
-                        (euporie-termint-debug-log 'debug "  Strategy 2 - Found :dir in buffer %s: %s" (buffer-name buffer) found-dir)
-                        (setq extracted-dir found-dir)))))
-              (error 
-               (euporie-termint-debug-log 'debug "  Strategy 2 - Error in buffer %s: %s" (buffer-name buffer) err)))))))
+        ;; Strategy 1a: Use org-src--babel-info (most reliable)
+        (if (and (boundp 'org-src--babel-info) org-src--babel-info)
+            (let ((params (nth 2 org-src--babel-info)))
+              (setq extracted-dir (cdr (assq :dir params)))
+              (euporie-termint-debug-log 'debug "Strategy 1a (babel-info): :dir = %s" extracted-dir))
+          
+          ;; Strategy 1b: Fallback to org-src-do-at-code-block
+          (if (and (boundp 'org-src--beg-marker) org-src--beg-marker)
+              (condition-case err
+                  (org-src-do-at-code-block
+                   (when-let ((info (org-babel-get-src-block-info 'no-eval)))
+                     (setq extracted-dir (cdr (assq :dir (nth 2 info))))
+                     (euporie-termint-debug-log 'debug "Strategy 1b (do-at-code-block): :dir = %s" extracted-dir)))
+                (error 
+                 (euporie-termint-debug-log 'debug "Strategy 1b (do-at-code-block) failed: %s" err)))
+            
+            ;; Strategy 1c: Final fallback using marker directly  
+            (when (and (boundp 'org-src--beg-marker) 
+                       org-src--beg-marker
+                       (markerp org-src--beg-marker)
+                       (marker-buffer org-src--beg-marker)
+                       (buffer-live-p (marker-buffer org-src--beg-marker))
+                       (marker-position org-src--beg-marker))
+              (condition-case err
+                  (with-current-buffer (marker-buffer org-src--beg-marker)
+                    (save-excursion
+                      (goto-char (marker-position org-src--beg-marker))
+                      (when-let ((info (org-babel-get-src-block-info 'no-eval)))
+                        (setq extracted-dir (cdr (assq :dir (nth 2 info))))
+                        (euporie-termint-debug-log 'debug "Strategy 1c (marker): :dir = %s" extracted-dir))))
+                (error 
+                 (euporie-termint-debug-log 'debug "Strategy 1c (marker) failed: %s" err))))))))
+     
+     ;; Case 2: In org-mode buffer - get params from current src block at point
+     ((eq major-mode 'org-mode)
+      (euporie-termint-debug-log 'debug "In org-mode buffer - getting params from current block")
+      (condition-case err
+          (when-let ((info (org-babel-get-src-block-info 'no-eval)))
+            (setq extracted-dir (cdr (assq :dir (nth 2 info))))
+            (euporie-termint-debug-log 'debug "  Extracted :dir from current block: %s" extracted-dir))
+        (error 
+         (euporie-termint-debug-log 'debug "  Current block extraction failed: %s" err))))
+     
+     ;; Case 3: Other buffers - no :dir extraction needed
+     (t
+      (euporie-termint-debug-log 'debug "Not in org context - no :dir extraction needed")))
     
     (if extracted-dir
         (euporie-termint-debug-log 'info "✓ Successfully extracted :dir: %s" extracted-dir)
