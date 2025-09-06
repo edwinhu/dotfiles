@@ -6,44 +6,36 @@
 
 ;;; Code:
 
-;; Unicode and emoji fixes for Claude Code IDE output
-(defun fix-unicode-emoji-substitution ()
-  "Prevent technical Unicode symbols from rendering as color emoji.
-This function forces JetBrains Mono for ranges of Unicode characters
-that should be monospace but are often hijacked by Apple Color Emoji."
+;; Aggressive font configuration for Claude Code IDE output
+;; Forces technical symbols to render as monospace instead of colorful emoji
+
+(defun +claude-force-monospace-symbols ()
+  "Force technical symbols to use JetBrains Mono instead of colorful emoji.
+Uses the original proven approach from the GitHub issue with comprehensive coverage."
   (when (fboundp 'set-fontset-font)
     (let ((mono-font "JetBrains Mono"))
-      ;; Technical Symbols (U+2300-U+23FF)
-      ;; Includes: ⏸ ⏹ ⏺ ⏻ ⏼ ⏽ etc.
+      ;; Technical Symbols (U+2300-U+23FF) - Includes ⏸ ⏹ ⏺ ⏻ ⏼ ⏽ etc.
       (set-fontset-font t '(#x2300 . #x23ff) mono-font)
       
-      ;; Geometric Shapes (U+25A0-U+25FF)
-      ;; Includes: ■ □ ▲ △ ▶ ▷ ◀ ◁ ● ○ etc.
+      ;; Geometric Shapes (U+25A0-U+25FF) - Includes ■ □ ▲ △ ▶ ▷ ◀ ◁ ● ○ etc.
       (set-fontset-font t '(#x25a0 . #x25ff) mono-font)
       
-      ;; Box Drawing (U+2500-U+257F)
-      ;; Includes: ─ │ ┌ ┐ └ ┘ ├ ┤ etc.
+      ;; Box Drawing (U+2500-U+257F) - Includes ─ │ ┌ ┐ └ ┘ ├ ┤ etc.
       (set-fontset-font t '(#x2500 . #x257f) mono-font)
       
-      ;; Block Elements (U+2580-U+259F)
-      ;; Includes: ▀ ▄ █ ▌ ▐ etc.
+      ;; Block Elements (U+2580-U+259F) - Includes ▀ ▄ █ ▌ ▐ etc.
       (set-fontset-font t '(#x2580 . #x259f) mono-font)
       
-      ;; Arrows (U+2190-U+21FF)
-      ;; Includes: ← → ↑ ↓ ↔ ↕ etc.
+      ;; Arrows (U+2190-U+21FF) - Includes ← → ↑ ↓ ↔ ↕ etc.
       (set-fontset-font t '(#x2190 . #x21ff) mono-font)
       
-      ;; Mathematical Operators (U+2200-U+22FF)
-      ;; Includes: ∀ ∂ ∃ ∅ ∇ ∈ etc.
+      ;; Mathematical Operators (U+2200-U+22FF) - Includes ∀ ∂ ∃ ∅ ∇ ∈ etc.
       (set-fontset-font t '(#x2200 . #x22ff) mono-font)
       
-      ;; Miscellaneous Symbols (U+2600-U+26FF)
-      ;; Includes: ☀ ☁ ☂ ☃ ★ ☆ ☎ ☏ ☐ ☑ ☒ ⚡ etc.
-      ;; This range has many emoji variants, so be selective
+      ;; Miscellaneous Symbols (U+2600-U+26FF) - CRITICAL for ⚡ ⚙ ⚠ etc.
       (set-fontset-font t '(#x2600 . #x26ff) mono-font)
       
-      ;; Dingbats (U+2700-U+27BF) - often has emoji variants
-      ;; Includes: ✓ ✗ ✦ ✧ ✳ etc.
+      ;; Dingbats (U+2700-U+27BF) - CRITICAL for ✓ ✗ ✅ ❌ etc.
       (set-fontset-font t '(#x2700 . #x27bf) mono-font)
       
       ;; Supplemental Arrows-A (U+27F0-U+27FF)
@@ -52,23 +44,36 @@ that should be monospace but are often hijacked by Apple Color Emoji."
       ;; Supplemental Arrows-B (U+2900-U+297F)
       (set-fontset-font t '(#x2900 . #x297f) mono-font)
       
-      ;; Miscellaneous Symbols and Arrows (U+2B00-U+2BFF)
-      ;; Includes: ⬅ ⬆ ⬇ ⭐ ⭕ etc.
+      ;; Miscellaneous Symbols and Arrows (U+2B00-U+2BFF) - Includes ⬅ ⬆ ⬇ ⭐ ⭕ etc.
       (set-fontset-font t '(#x2b00 . #x2bff) mono-font)
       
-      ;; Additional specific problematic characters
-      ;; These are common technical symbols that still might slip through
+      ;; Individual problematic characters that still might slip through
       (dolist (char '(?⏸ ?⏹ ?⏺ ?⏻ ?⏼ ?⏽  ; Media controls
-                      ?✓ ?✗ ?✦ ?✧ ?✳      ; Check marks and asterisks
+                      ?✓ ?✗ ?✦ ?✧ ?✳      ; Check marks (basic)
                       ?▶ ?◀ ?▲ ?▼ ?◆ ?◇    ; Triangles and diamonds
                       ?● ?○ ?■ ?□ ?▪ ?▫    ; Circles and squares
                       ?⚡ ?⚠ ?⚙ ?⚛         ; Warning and tech symbols
                       ?⬅ ?➡ ?⬆ ?⬇         ; Bold arrows
                       ?⭐ ?⭕))             ; Star and circle
-        (set-fontset-font t char mono-font)))))
+        (set-fontset-font t char mono-font))
+      
+      ;; Extra aggressive approach for the most stubborn emoji characters
+      ;; These characters have strong emoji variants that resist normal fontset overrides
+      (dolist (char '(?✅ ?❌))  ; Heavy checkmark and cross mark
+        (set-fontset-font t char mono-font nil 'prepend)
+        (set-fontset-font "fontset-default" char mono-font nil 'prepend)
+        ;; Force these specific characters by removing emoji font association
+        (set-fontset-font t char mono-font))
+      
+      (message "Claude Code: Applied comprehensive monospace font overrides"))))
 
-;; Run after Doom's font setup (this is the critical hook)
-(add-hook! 'after-setting-font-hook :append #'fix-unicode-emoji-substitution)
+;; Apply font configuration immediately and on font changes
+(+claude-force-monospace-symbols)
+(add-hook 'after-setting-font-hook #'+claude-force-monospace-symbols)
+
+;; Also run after Doom loads to override any emoji font settings
+(after! doom-themes
+  (+claude-force-monospace-symbols))
 
 ;; Unicode testing function for Claude Code IDE
 (defun unicode-test-claude-code ()
