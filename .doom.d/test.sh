@@ -1,21 +1,55 @@
 #!/bin/bash
 
-# test.sh - Automated test for C-RET :dir parameter extraction with timing analysis
-# Tests the hook-based approach for extracting :dir from org-src blocks
+# test.sh - Automated multi-language test for C-RET :dir parameter extraction with timing analysis
+# Tests the hook-based approach for extracting :dir from org-src blocks for Python, R, and SAS
 
 set -e
 
+# Test configuration
+LANGUAGES=("python" "r" "sas")
+declare -A LANGUAGE_PATTERNS=(
+    ["python"]="Python Remote Execution Test"
+    ["r"]="R Remote Execution Test" 
+    ["sas"]="SAS Remote Test"
+)
+declare -A LANGUAGE_BLOCKS=(
+    ["python"]="Python Test Block (Remote)"
+    ["r"]="R Test Block (Remote)"
+    ["sas"]="SAS Test Block"
+)
+# Username patterns to detect remote vs local execution
+declare -A REMOTE_USERNAME_PATTERNS=(
+    ["python"]="Username: eddyhu"
+    ["r"]="Username: eddyhu"
+    ["sas"]="User: eddyhu"
+)
+declare -A LOCAL_USERNAME_PATTERNS=(
+    ["python"]="Username: vwh7mb"
+    ["r"]="Username: vwh7mb"
+    ["sas"]="User: vwh7mb"
+)
+declare -A SUCCESS_PATTERNS=(
+    ["python"]="SUCCESS: Running on WRDS remote server"
+    ["r"]="SUCCESS: Running on WRDS remote server"
+    ["sas"]="SUCCESS: Running on WRDS remote server"
+)
+declare -A FAILURE_PATTERNS=(
+    ["python"]="FAILURE: Running locally as vwh7mb"
+    ["r"]="FAILURE: Running locally as.*vwh7mb"
+    ["sas"]="FAILURE: Running locally as.*vwh7mb"
+)
+
 # Timing variables
 TEST_START_TIME=$(date +%s.%3N)
-PHASES_START=()
-PHASES_END=()
-PHASE_NAMES=("Emacs Startup" "Code Execution")
+declare -A PHASE_START_TIMES
+declare -A PHASE_END_TIMES
+PHASES=("Emacs_Startup" "Python_Execution" "R_Execution" "SAS_Execution")
 
 # Function to record phase start time
 record_phase_start() {
     local phase_name="$1"
     local timestamp=$(date +%s.%3N)
-    PHASES_START+=($timestamp)
+    PHASE_START_TIMES["$phase_name"]=$timestamp
     echo "[TIMING] $phase_name phase started at $(date)"
 }
 
@@ -23,118 +57,368 @@ record_phase_start() {
 record_phase_end() {
     local phase_name="$1"
     local timestamp=$(date +%s.%3N)
-    PHASES_END+=($timestamp)
+    PHASE_END_TIMES["$phase_name"]=$timestamp
     echo "[TIMING] $phase_name phase completed at $(date)"
 }
 
 # Function to parse timing from logs
 parse_log_timing() {
+    local language="$1"
     local ssh_time="N/A"
     local qrsh_time="N/A" 
-    local sas_time="N/A"
+    local kernel_time="N/A"
     
-    # Parse SAS kernel timing
-    if [ -f ~/sas-workflow-debug.log ]; then
-        sas_time=$(rg "SAS kernel ready after.*\(([0-9.]+) seconds\)" ~/sas-workflow-debug.log -o -r '$1' 2>/dev/null | tail -1)
-        [ -z "$sas_time" ] && sas_time="N/A"
-    fi
+    # Parse kernel timing based on language
+    case $language in
+        "python")
+            if [ -f ~/euporie-termint-debug.log ]; then
+                kernel_time=$(rg "Python kernel ready after.*\(([0-9.]+) seconds\)" ~/euporie-termint-debug.log -o -r '$1' 2>/dev/null | tail -1)
+            fi
+            ;;
+        "r")
+            if [ -f ~/euporie-termint-debug.log ]; then
+                kernel_time=$(rg "R kernel ready after.*\(([0-9.]+) seconds\)" ~/euporie-termint-debug.log -o -r '$1' 2>/dev/null | tail -1)
+            fi
+            ;;
+        "sas")
+            if [ -f ~/sas-workflow-debug.log ]; then
+                kernel_time=$(rg "SAS kernel ready after.*\(([0-9.]+) seconds\)" ~/sas-workflow-debug.log -o -r '$1' 2>/dev/null | tail -1)
+            fi
+            ;;
+    esac
     
-    # Parse SSH connection timing (if logs are enhanced to include this)
+    # Parse SSH and QRSH connection timing
     if [ -f ~/tramp-qrsh-debug.log ]; then
         ssh_time=$(rg "SSH connection established after.*\(([0-9.]+) seconds\)" ~/tramp-qrsh-debug.log -o -r '$1' 2>/dev/null | tail -1)
-        [ -z "$ssh_time" ] && ssh_time="N/A"
-        
         qrsh_time=$(rg "QRSH connection established after.*\(([0-9.]+) seconds\)" ~/tramp-qrsh-debug.log -o -r '$1' 2>/dev/null | tail -1)
-        [ -z "$qrsh_time" ] && qrsh_time="N/A"
     fi
     
-    echo "$ssh_time $qrsh_time $sas_time"
-}
-
-# Function to calculate phase durations from script timing
-calculate_phase_durations() {
-    local durations=()
-    for i in "${!PHASES_START[@]}"; do
-        if [ ${#PHASES_END[@]} -gt $i ]; then
-            local duration=$(echo "${PHASES_END[$i]} - ${PHASES_START[$i]}" | bc -l 2>/dev/null || echo "0")
-            durations+=($duration)
-        else
-            durations+=("N/A")
-        fi
-    done
-    echo "${durations[@]}"
-}
-
-# Function to analyze timing performance
-analyze_timing() {
-    local log_times=($1)  # ssh qrsh sas from logs
-    local script_durations=($2)  # calculated from script timing
+    # Set defaults if not found
+    [ -z "$ssh_time" ] && ssh_time="N/A"
+    [ -z "$qrsh_time" ] && qrsh_time="N/A"
+    [ -z "$kernel_time" ] && kernel_time="N/A"
     
+    echo "$ssh_time $qrsh_time $kernel_time"
+}
+
+# Function to calculate phase duration
+calculate_phase_duration() {
+    local phase_name="$1"
+    local start="${PHASE_START_TIMES[$phase_name]}"
+    local end="${PHASE_END_TIMES[$phase_name]}"
+    
+    if [ -n "$start" ] && [ -n "$end" ]; then
+        echo "$end - $start" | bc -l 2>/dev/null || echo "0"
+    else
+        echo "N/A"
+    fi
+}
+
+# Function to test language execution
+test_language_execution() {
+    local language="$1"
+    local language_title="${language^}"  # Capitalize first letter
+    local block_pattern="${LANGUAGE_BLOCKS[$language]}"
+    local output_pattern="${LANGUAGE_PATTERNS[$language]}"
+    
+    echo "=== Testing $language_title Language ==="
+    
+    # Open test file and navigate to the specific language block
+    echo "Step: Opening test.org and navigating to $language_title block..."
+    emacsclient --eval "(progn
+      (message \"=== TEST: Opening ~/projects/emacs-euporie/test.org ===\")
+      (find-file \"~/projects/emacs-euporie/test.org\")
+      (goto-char (point-min))
+      (if (search-forward \"$block_pattern\" nil t)
+          (progn
+            (search-forward \"#+begin_src $language :dir\" nil t)
+            (forward-line 1)
+            (message \"Found $language_title block with :dir parameter\")
+            (message \"Current position: line %d\" (line-number-at-pos))
+            ;; Load language support
+            (when (string= \"$language\" \"sas\")
+              (require 'ob-sas))
+            (org-edit-special)
+            (sleep-for 1)
+            (message \"✓ Entered org-src edit buffer: %s\" (buffer-name))
+            (message \"Buffer mode: %s\" major-mode))
+        (error \"Could not find $language_title block with :dir parameter\")))"
+    
+    # Execute C-RET in the language-specific edit buffer
+    echo "Step: Executing C-RET in $language_title org-src edit buffer..."
+    record_phase_start "${language_title}_Execution"
+    
+    # Determine buffer name pattern based on language
+    local buffer_pattern=""
+    case $language in
+        "python") buffer_pattern="*Org Src test.org[ python ]*" ;;
+        "r") buffer_pattern="*Org Src test.org[ R ]*" ;;
+        "sas") buffer_pattern="*Org Src test.org[ sas ]*" ;;
+    esac
+    
+    emacsclient --eval "(progn
+      (message \"=== TEST: Executing C-RET for $language_title ===\")
+      (let ((edit-buffer (get-buffer \"$buffer_pattern\")))
+        (if edit-buffer
+            (with-current-buffer edit-buffer
+              (message \"Switched to $language_title buffer: %s\" (buffer-name))
+              (goto-char (point-min))
+              ;; Find appropriate content to execute
+              (cond
+                ((string= \"$language\" \"python\") (search-forward \"import pandas\" nil t))
+                ((string= \"$language\" \"r\") (search-forward \"test_data\" nil t))
+                ((string= \"$language\" \"sas\") (search-forward \"proc print\" nil t)))
+              (euporie-termint-send-region-or-line)
+              (message \"C-RET executed from $language_title buffer\"))
+          (error \"Could not find $language_title org-src buffer\"))))"
+    
+    # Check window split arrangement for this language
+    echo "Step: Checking window split arrangement for $language_title..."
+    local window_split_success
+    window_split_success=$(emacsclient --eval "(progn
+      (message \"=== TEST: Checking $language_title window split arrangement ===\")
+      (let ((windows (window-list))
+            (current-buf (buffer-name))
+            (euporie-buf-visible nil)
+            (org-src-visible nil)
+            (org-src-buf (get-buffer \"$buffer_pattern\"))
+            (euporie-buf (get-buffer \"*euporie-$language*\")))
+        
+        (message \"Number of windows: %d\" (length windows))
+        (dolist (win windows)
+          (let ((buf-name (buffer-name (window-buffer win))))
+            (when (string-match-p \"\\\\*euporie-.*\\\\*\" buf-name)
+              (setq euporie-buf-visible t))
+            (when (string-match-p \"\\\\*Org Src.*\\\\[\" buf-name)
+              (setq org-src-visible t))))
+        
+        ;; Fix window split if needed
+        (unless (and (>= (length windows) 2) euporie-buf-visible org-src-visible)
+          (when (and org-src-buf euporie-buf)
+            (message \"Fixing window split arrangement for $language_title...\")
+            (delete-other-windows)
+            (switch-to-buffer org-src-buf)
+            (split-window-right)
+            (other-window 1)
+            (switch-to-buffer euporie-buf)
+            (other-window 1)
+            (message \"✓ Fixed window split: org-src left, euporie right\")
+            (setq euporie-buf-visible t org-src-visible t)))
+        
+        (if (and (>= (length windows) 2) euporie-buf-visible org-src-visible)
+            (progn 
+              (message \"✓ SUCCESS: $language_title window split correct\") 
+              t)
+          (progn
+            (message \"✗ FAIL: $language_title window split incorrect\")
+            nil))))")
+    
+    # Wait for execution
+    echo "Step: Waiting for $language_title execution to complete..."
+    sleep 30  # Shorter wait since we're testing multiple languages
+    record_phase_end "${language_title}_Execution"
+    
+    # Check for output AND username verification
+    echo "Step: Checking for $language_title output and username verification..."
+    local output_success
+    local remote_pattern="${REMOTE_USERNAME_PATTERNS[$language]}"
+    local local_pattern="${LOCAL_USERNAME_PATTERNS[$language]}"
+    local success_pattern="${SUCCESS_PATTERNS[$language]}"
+    local failure_pattern="${FAILURE_PATTERNS[$language]}"
+    
+    output_success=$(emacsclient --eval "(progn
+      (message \"=== TEST: Checking $language_title euporie buffer for output ===\")
+      (let ((euporie-buffer (get-buffer \"*euporie-$language*\")))
+        (if euporie-buffer
+            (progn
+              (message \"✓ Found $language_title euporie buffer\")
+              (with-current-buffer euporie-buffer
+                (let ((content (buffer-string)))
+                  (message \"$language_title buffer content length: %d chars\" (length content))
+                  (when (> (length content) 100)
+                    (message \"Buffer content preview: %s\" (substring content 0 (min 500 (length content)))))
+                  (message \"Checking for $language_title output pattern: $output_pattern\")
+                  (message \"Checking for remote username pattern: $remote_pattern\")
+                  (message \"Checking for success pattern: $success_pattern\")
+                  (let ((has-output (string-match-p \"$output_pattern\" content))
+                        (has-remote-user (string-match-p \"$remote_pattern\" content))
+                        (has-success (string-match-p \"$success_pattern\" content))
+                        (has-local-user (string-match-p \"$local_pattern\" content))
+                        (has-failure (string-match-p \"$failure_pattern\" content)))
+                    (message \"Results: output=%s remote-user=%s success=%s local-user=%s failure=%s\" 
+                            has-output has-remote-user has-success has-local-user has-failure)
+                    (if (and has-output has-remote-user has-success (not has-local-user) (not has-failure))
+                        (progn
+                          (message \"✓ SUCCESS: Found expected $language_title output with remote username verification\")
+                          t)
+                      (progn
+                        (when has-local-user
+                          (message \"✗ CRITICAL: Local username detected - execution fell back to local!\"))
+                        (when has-failure
+                          (message \"✗ CRITICAL: Failure pattern detected - remote execution failed!\"))
+                        (message \"✗ FAIL: $language_title remote execution verification failed\")
+                        nil))))))
+          (progn
+            (message \"✗ FAIL: No $language_title euporie buffer found\")
+            nil))))")
+    
+    # Parse timing for this language
+    local log_times
+    log_times=$(parse_log_timing "$language")
+    local script_duration
+    script_duration=$(calculate_phase_duration "${language_title}_Execution")
+    
+    # Store results for summary
+    declare -gA LANGUAGE_RESULTS
+    LANGUAGE_RESULTS["${language}_output"]=$output_success
+    LANGUAGE_RESULTS["${language}_window"]=$window_split_success
+    LANGUAGE_RESULTS["${language}_timing"]="$log_times"
+    LANGUAGE_RESULTS["${language}_duration"]="$script_duration"
+    
+    echo "✓ $language_title test phase completed"
     echo ""
-    echo "=== TIMING ANALYSIS ==="
+}
+
+# Function to analyze timing performance across all languages
+analyze_multi_language_timing() {
+    echo ""
+    echo "=== MULTI-LANGUAGE TIMING ANALYSIS ==="
     
-    # Display timing from logs (more accurate for actual process timing)
-    [ "${log_times[0]}" != "N/A" ] && echo "SSH Connection: ${log_times[0]} seconds"
-    [ "${log_times[1]}" != "N/A" ] && echo "QRSH Connection: ${log_times[1]} seconds"  
-    [ "${log_times[2]}" != "N/A" ] && echo "SAS Kernel Startup: ${log_times[2]} seconds"
-    
-    # Display script phase timing (includes waiting and coordination overhead)
-    for i in "${!PHASE_NAMES[@]}"; do
-        if [ "${script_durations[$i]}" != "N/A" ] && [ "${script_durations[$i]}" != "0" ]; then
-            printf "%-20s %s seconds (script timing)\n" "${PHASE_NAMES[$i]}:" "${script_durations[$i]}"
-        fi
+    for language in "${LANGUAGES[@]}"; do
+        local language_title="${language^}"
+        local log_times=(${LANGUAGE_RESULTS["${language}_timing"]})
+        local script_duration="${LANGUAGE_RESULTS["${language}_duration"]}"
+        
+        echo ""
+        echo "--- $language_title Timing ---"
+        [ "${log_times[0]}" != "N/A" ] && echo "SSH Connection: ${log_times[0]} seconds"
+        [ "${log_times[1]}" != "N/A" ] && echo "QRSH Connection: ${log_times[1]} seconds"  
+        [ "${log_times[2]}" != "N/A" ] && echo "Kernel Startup: ${log_times[2]} seconds"
+        [ "$script_duration" != "N/A" ] && echo "Script Phase: $script_duration seconds"
     done
     
     # Total time
     local total_time=$(echo "$(date +%s.%3N) - $TEST_START_TIME" | bc -l)
-    echo "Total Time: $total_time seconds"
+    echo ""
+    echo "Total Test Time: $total_time seconds"
     
     echo ""
     echo "PERFORMANCE ANALYSIS:"
+    echo "- Language comparison (kernel startup times):"
     
-    # Find fastest/slowest from log times
-    local fastest_phase="Unknown"
-    local slowest_phase="Unknown"
-    local fastest_time=999999
-    local slowest_time=0
-    
-    for i in "${!PHASE_NAMES[@]}"; do
-        local time="${log_times[$i]}"
-        if [ "$time" != "N/A" ] && [ "$(echo "$time > 0" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
-            if [ "$(echo "$time < $fastest_time" | bc -l)" = "1" ]; then
-                fastest_time=$time
-                fastest_phase="${PHASE_NAMES[$i]}"
-            fi
-            if [ "$(echo "$time > $slowest_time" | bc -l)" = "1" ]; then
-                slowest_time=$time  
-                slowest_phase="${PHASE_NAMES[$i]}"
-            fi
+    for language in "${LANGUAGES[@]}"; do
+        local language_title="${language^}"
+        local log_times=(${LANGUAGE_RESULTS["${language}_timing"]})
+        local kernel_time="${log_times[2]}"
+        if [ "$kernel_time" != "N/A" ]; then
+            printf "  %-10s %s seconds\n" "$language_title:" "$kernel_time"
         fi
     done
     
-    [ "$fastest_phase" != "Unknown" ] && echo "- Fastest phase: $fastest_phase ($fastest_time seconds)"
-    [ "$slowest_phase" != "Unknown" ] && echo "- Slowest phase: $slowest_phase ($slowest_time seconds)"
-    
-    # Flag slow phases (>5 seconds)
-    echo "- Performance warnings:"
-    local warnings_found=false
-    for i in "${!PHASE_NAMES[@]}"; do
-        local time="${log_times[$i]}"
-        if [ "$time" != "N/A" ] && [ "$(echo "$time > 5.0" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
-            echo "  ⚠️  ${PHASE_NAMES[$i]} is slow ($time seconds)"
-            warnings_found=true
-        fi
-    done
-    [ "$warnings_found" = false ] && echo "  ✓ All phases under 5 seconds"
-    
-    # Flag very slow total time
-    if [ "$(echo "$total_time > 60.0" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
+    # Flag slow total time
+    if [ "$(echo "$total_time > 120.0" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
         echo "  ⚠️  Total test time is slow ($total_time seconds)"
+    else
+        echo "  ✓ Total test time acceptable ($total_time seconds)"
     fi
 }
 
-echo "=== Euporie C-RET :dir Parameter Test ==="
-echo "$(date): Starting automated test"
+# Function to check remote execution logs and username verification
+check_remote_execution_logs() {
+    echo "Step: Analyzing logs and buffers for remote execution across all languages..."
+    
+    declare -gA REMOTE_RESULTS
+    
+    for language in "${LANGUAGES[@]}"; do
+        local language_title="${language^}"
+        
+        # Check for remote execution indicators in logs
+        local remote_detected=false
+        local local_detected=false
+        local hook_success=false
+        
+        case $language in
+            "sas")
+                if grep -q "is-remote.*qrsh" ~/sas-workflow-debug.log 2>/dev/null; then
+                    remote_detected=true
+                fi
+                if grep -q "dir: nil" ~/sas-workflow-debug.log 2>/dev/null; then
+                    local_detected=true
+                fi
+                ;;
+            "python"|"r")
+                if grep -q "is-remote.*qrsh" ~/euporie-termint-debug.log 2>/dev/null; then
+                    remote_detected=true
+                fi
+                if grep -q "dir: nil" ~/euporie-termint-debug.log 2>/dev/null; then
+                    local_detected=true
+                fi
+                ;;
+        esac
+        
+        # Check for hook success
+        if grep -q "Successfully extracted :dir:" ~/euporie-debug.log 2>/dev/null; then
+            hook_success=true
+        fi
+        
+        # NEW: Check buffer content for username verification
+        local buffer_remote_user=false
+        local buffer_local_user=false
+        local buffer_success=false
+        local buffer_failure=false
+        
+        local remote_pattern="${REMOTE_USERNAME_PATTERNS[$language]}"
+        local local_pattern="${LOCAL_USERNAME_PATTERNS[$language]}"
+        local success_pattern="${SUCCESS_PATTERNS[$language]}"
+        local failure_pattern="${FAILURE_PATTERNS[$language]}"
+        
+        # Check actual buffer content for username patterns
+        local buffer_content
+        buffer_content=$(emacsclient --eval "(if (get-buffer \"*euporie-$language*\")
+            (with-current-buffer \"*euporie-$language*\" (buffer-string))
+          \"Buffer not found\")" 2>/dev/null || echo "Error getting buffer")
+          
+        if [[ "$buffer_content" =~ $remote_pattern ]]; then
+            buffer_remote_user=true
+        fi
+        if [[ "$buffer_content" =~ $local_pattern ]]; then
+            buffer_local_user=true
+        fi
+        if [[ "$buffer_content" =~ $success_pattern ]]; then
+            buffer_success=true
+        fi
+        if [[ "$buffer_content" =~ $failure_pattern ]]; then
+            buffer_failure=true
+        fi
+        
+        REMOTE_RESULTS["${language}_remote"]=$remote_detected
+        REMOTE_RESULTS["${language}_local_avoided"]=$([ "$local_detected" = false ] && echo true || echo false)
+        REMOTE_RESULTS["${language}_hook"]=$hook_success
+        REMOTE_RESULTS["${language}_buffer_remote_user"]=$buffer_remote_user
+        REMOTE_RESULTS["${language}_buffer_local_user"]=$buffer_local_user
+        REMOTE_RESULTS["${language}_buffer_success"]=$buffer_success
+        REMOTE_RESULTS["${language}_buffer_failure"]=$buffer_failure
+        
+        echo "- $language_title Log Analysis:"
+        echo "  - Remote detected: $remote_detected"
+        echo "  - Local avoided: $([ "$local_detected" = false ] && echo true || echo false)"
+        echo "  - Hook success: $hook_success"
+        echo "- $language_title Buffer Analysis:"
+        echo "  - Remote username (eddyhu): $buffer_remote_user"
+        echo "  - Local username (vwh7mb): $buffer_local_user"
+        echo "  - Success message: $buffer_success"
+        echo "  - Failure message: $buffer_failure"
+        echo "  - VERDICT: $([ "$buffer_remote_user" = true ] && [ "$buffer_success" = true ] && [ "$buffer_local_user" = false ] && [ "$buffer_failure" = false ] && echo "✓ TRUE REMOTE" || echo "✗ FALSE POSITIVE")"
+    done
+}
+
+echo "=== Multi-Language Euporie C-RET :dir Parameter Test ==="
+echo "$(date): Starting automated test for Python, R, and SAS"
+echo "Testing languages: ${LANGUAGES[*]}"
+
+# Initialize results storage
+declare -A LANGUAGE_RESULTS
+declare -A REMOTE_RESULTS
 
 # Step 1: Kill existing Emacs processes
 echo "Step 1: Killing existing Emacs processes..."
@@ -145,16 +429,17 @@ sleep 2
 echo "Step 2: Clearing debug logs..."
 > ~/sas-workflow-debug.log
 > ~/euporie-debug.log
+> ~/euporie-termint-debug.log
 > ~/tramp-qrsh-debug.log 2>/dev/null || true
 
-# Step 3: Start fresh Emacs WITHOUT environment inheritance issues
+# Step 3: Start fresh Emacs
 echo "Step 3: Starting fresh Emacs.app..."
-record_phase_start "Emacs Startup"
+record_phase_start "Emacs_Startup"
 osascript -e 'tell application "Emacs" to activate' &
-sleep 5  # Wait for Emacs to fully load
-record_phase_end "Emacs Startup"
+sleep 5
+record_phase_end "Emacs_Startup"
 
-# Step 3a: Configure euporie environment in Emacs session
+# Step 3a: Configure euporie environment
 echo "Step 3a: Configuring euporie environment in Emacs..."
 emacsclient --eval "(progn
   (message \"=== Configuring euporie environment ===\")
@@ -163,194 +448,84 @@ emacsclient --eval "(progn
     (setenv \"PATH\" (concat project-dir \".pixi/envs/default/bin:\" (getenv \"PATH\")))
     (message \"✓ Updated PATH for euporie\")))"
 
-# Step 4: Open test.org file, navigate to SAS block, and enter org-src edit mode
-echo "Step 4: Opening test.org file and entering SAS edit mode..."
-emacsclient --eval "(progn
-  (message \"=== TEST: Opening ~/projects/emacs-euporie/test.org ===\")
-  (find-file \"~/projects/emacs-euporie/test.org\")
-  (goto-char (point-min))
-  (if (search-forward \"#+begin_src sas :dir\" nil t)
-      (progn
-        (forward-line 1)
-        (message \"Found SAS block with :dir parameter\")
-        (message \"Current position: line %d, content: %s\" 
-                 (line-number-at-pos)
-                 (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
-        ;; Load SAS support and enter edit mode in same call
-        (require 'ob-sas)
-        (message \"✓ Loaded ob-sas\")
-        (org-edit-special)
-        (sleep-for 1)
-        (message \"✓ Entered org-src edit buffer: %s\" (buffer-name))
-        (message \"Buffer mode: %s\" major-mode))
-    (error \"Could not find SAS block with :dir parameter\")))"
+# Step 4-8: Test each language
+for language in "${LANGUAGES[@]}"; do
+    test_language_execution "$language"
+done
 
-# Step 5: Execute C-RET in org-src edit buffer (this triggers remote connection)
-echo "Step 5: Executing C-RET in org-src edit buffer..."
-record_phase_start "Code Execution"
-emacsclient --eval "(progn
-  (message \"=== TEST: Executing C-RET ===\")
-  ;; Switch to the SAS org-src edit buffer
-  (let ((sas-buffer (get-buffer \"*Org Src test.org[ sas ]*\")))
-    (if sas-buffer
-        (with-current-buffer sas-buffer
-          (message \"Switched to SAS buffer: %s\" (buffer-name))
-          (goto-char (point-min))
-          (search-forward \"proc print\" nil t)
-          (euporie-termint-send-region-or-line)
-          (message \"C-RET executed from SAS buffer\"))
-      (error \"Could not find SAS org-src buffer\"))))"
+# Step 9: Check remote execution logs
+check_remote_execution_logs
 
-# Step 5a: Check window split arrangement and fix if needed
-echo "Step 5a: Checking window split arrangement..."  
-WINDOW_SPLIT_SUCCESS=$(emacsclient --eval "(progn
-  (message \"=== TEST: Checking window split arrangement ===\")
-  (let ((windows (window-list))
-        (current-buf (buffer-name))
-        (euporie-buf-visible nil)
-        (org-src-visible nil)
-        (org-src-buf (get-buffer \"*Org Src test.org[ sas ]*\"))
-        (euporie-buf (get-buffer \"*euporie-sas*\")))
-    
-    (message \"Number of windows: %d\" (length windows))
-    (message \"Current buffer: %s\" current-buf)
-    (dolist (win windows)
-      (let ((buf-name (buffer-name (window-buffer win))))
-        (message \"Window contains buffer: %s\" buf-name)
-        (when (string-match-p \"\\*euporie-.*\\*\" buf-name)
-          (setq euporie-buf-visible t))
-        (when (string-match-p \"\\*Org Src.*\\\\[\" buf-name)
-          (setq org-src-visible t))))
-    
-    ;; If window split is incorrect, fix it
-    (unless (and (>= (length windows) 2) euporie-buf-visible org-src-visible)
-      (when (and org-src-buf euporie-buf)
-        (message \"Fixing window split arrangement...\")
-        (delete-other-windows)
-        (switch-to-buffer org-src-buf)
-        (split-window-right)
-        (other-window 1)
-        (switch-to-buffer euporie-buf)
-        (other-window 1)  ; Back to org-src
-        (message \"✓ Fixed window split: org-src left, euporie right\")
-        (setq euporie-buf-visible t org-src-visible t)))
-    
-    (if (and (>= (length windows) 2) euporie-buf-visible org-src-visible)
-        (progn 
-          (message \"✓ SUCCESS: Window split with both org-src and euporie buffers visible\") 
-          t)
-      (progn
-        (message \"✗ FAIL: Window split incorrect\")
-        (message \"  - euporie buffer visible: %s\" euporie-buf-visible)
-        (message \"  - org-src visible: %s\" org-src-visible) 
-        (message \"  - total windows: %d\" (length windows))
-        nil))))")
-
-# Step 6: Wait for execution and check buffer  
-echo "Step 6: Waiting for euporie console to start and execute code..."
-sleep 45  # Extended wait for remote connection + euporie startup + SAS table output
-record_phase_end "Code Execution"
-
-# Step 6a: Check for ACTUAL cars table output
-echo "Step 6a: Checking for actual cars table output..."
-# Use a simpler approach to avoid shell parsing issues
-emacsclient --eval "(progn
-  (message \"=== TEST: Checking euporie buffer for cars output ===\")
-  (let ((euporie-buffer (cl-find-if (lambda (buf) 
-                                      (string-match-p \"\\*euporie-.*\\*\" (buffer-name buf))) 
-                                    (buffer-list))))
-    (if euporie-buffer
-        (progn
-          (message \"✓ Found euporie buffer: %s\" (buffer-name euporie-buffer))
-          (with-current-buffer euporie-buffer
-            (let ((content (buffer-string)))
-              (message \"Euporie buffer content length: %d chars\" (length content))
-              (when (> (length content) 100)
-                (message \"Buffer content preview: %s\" (substring content 0 (min 500 (length content)))))
-              (message \"Checking for Acura content...\")
-              (message \"Has Acura: %s\" (string-match-p \"Acura\" content))
-              (message \"Has headers: %s\" (string-match-p \"Obs.*Make.*Model\" content)))))
-      (message \"✗ FAIL: No euporie buffer found\"))))"
-            
-CARS_SUCCESS=false  # We'll check this manually for now
-
-
-# Step 7: Check logs for local vs remote execution
-echo "Step 7: Analyzing logs..."
-
-# Check for remote execution indicators
-if grep -q "is-remote.*qrsh" ~/sas-workflow-debug.log 2>/dev/null; then
-    echo "✓ SUCCESS: Remote execution detected in logs"
-    REMOTE_SUCCESS=true
-else
-    echo "✗ FAIL: No remote execution detected"
-    REMOTE_SUCCESS=false
-fi
-
-if grep -q "dir: nil" ~/sas-workflow-debug.log 2>/dev/null; then
-    echo "✗ FAIL: Found 'dir: nil' in logs - indicates local execution"
-    LOCAL_DETECTED=true
-else
-    echo "✓ SUCCESS: No 'dir: nil' found in logs"  
-    LOCAL_DETECTED=false
-fi
-
-# Check for :dir parameter extraction
-if grep -q "Successfully extracted :dir:" ~/euporie-debug.log 2>/dev/null; then
-    echo "✓ SUCCESS: Hook successfully extracted :dir parameter"
-    HOOK_SUCCESS=true
-else
-    echo "✗ FAIL: Hook did not extract :dir parameter"
-    HOOK_SUCCESS=false
-fi
-
-# Step 8: Take screenshot
-echo "Step 8: Taking screenshot..."
+# Step 10: Take screenshot
+echo "Step 10: Taking screenshot..."
 osascript -e 'tell application "Emacs" to activate'
 sleep 0.5
 screencapture -T 0.5 ~/test-results-screenshot.png
 echo "Screenshot saved to ~/test-results-screenshot.png"
 
-# Step 9: Analyze timing performance
-echo "Step 9: Analyzing timing performance..."
-LOG_TIMES=$(parse_log_timing)
-SCRIPT_DURATIONS=$(calculate_phase_durations)
+# Step 11: Analyze timing performance
+echo "Step 11: Analyzing timing performance..."
+analyze_multi_language_timing
 
-# Summary
+# Step 12: Generate summary
 echo ""
-echo "=== STRICT TEST SUMMARY ==="
+echo "=== COMPREHENSIVE TEST SUMMARY ==="
 echo "Timestamp: $(date)"
 
-# Convert Emacs boolean results to shell booleans
-if [ "$CARS_OUTPUT_SUCCESS" = "t" ]; then
-    CARS_SUCCESS=true
-else
-    CARS_SUCCESS=false  
-fi
+# Check overall success criteria with enhanced username verification
+all_success=true
+for language in "${LANGUAGES[@]}"; do
+    local language_title="${language^}"
+    local output_success="${LANGUAGE_RESULTS["${language}_output"]}"
+    local window_success="${LANGUAGE_RESULTS["${language}_window"]}"
+    local remote_success="${REMOTE_RESULTS["${language}_remote"]}"
+    local hook_success="${REMOTE_RESULTS["${language}_hook"]}"
+    local local_avoided="${REMOTE_RESULTS["${language}_local_avoided"]}"
+    local buffer_remote_user="${REMOTE_RESULTS["${language}_buffer_remote_user"]}"
+    local buffer_local_user="${REMOTE_RESULTS["${language}_buffer_local_user"]}"
+    local buffer_success="${REMOTE_RESULTS["${language}_buffer_success"]}"
+    local buffer_failure="${REMOTE_RESULTS["${language}_buffer_failure"]}"
+    
+    echo ""
+    echo "--- $language_title Results ---"
+    echo "- Output detected: $([ "$output_success" = "t" ] && echo "✓ SUCCESS" || echo "✗ FAIL")"
+    echo "- Window split: $([ "$window_success" = "t" ] && echo "✓ SUCCESS" || echo "✗ FAIL")"
+    echo "- Remote execution (logs): $([ "$remote_success" = "true" ] && echo "✓ SUCCESS" || echo "✗ FAIL")"
+    echo "- Hook extraction: $([ "$hook_success" = "true" ] && echo "✓ SUCCESS" || echo "✗ FAIL")"
+    echo "- Local avoided (logs): $([ "$local_avoided" = "true" ] && echo "✓ SUCCESS" || echo "✗ FAIL")"
+    echo "- CRITICAL USERNAME VERIFICATION:"
+    echo "  - Remote username (eddyhu): $([ "$buffer_remote_user" = "true" ] && echo "✓ SUCCESS" || echo "✗ FAIL")"
+    echo "  - Local username avoided (vwh7mb): $([ "$buffer_local_user" = "false" ] && echo "✓ SUCCESS" || echo "✗ FAIL - LOCAL EXECUTION DETECTED")"
+    echo "  - Success message: $([ "$buffer_success" = "true" ] && echo "✓ SUCCESS" || echo "✗ FAIL")"
+    echo "  - Failure avoided: $([ "$buffer_failure" = "false" ] && echo "✓ SUCCESS" || echo "✗ FAIL - FAILURE MESSAGE DETECTED")"
+    
+    # Enhanced success criteria - must pass ALL tests including username verification
+    local true_remote_execution=false
+    if [ "$buffer_remote_user" = "true" ] && [ "$buffer_success" = "true" ] && [ "$buffer_local_user" = "false" ] && [ "$buffer_failure" = "false" ]; then
+        true_remote_execution=true
+    fi
+    
+    echo "- OVERALL VERDICT: $([ "$true_remote_execution" = "true" ] && echo "✓ TRUE REMOTE EXECUTION" || echo "✗ FALSE POSITIVE OR LOCAL FALLBACK")"
+    
+    # Check if this language passed all tests INCLUDING username verification
+    if [ "$output_success" != "t" ] || [ "$window_success" != "t" ] || [ "$remote_success" != "true" ] || [ "$hook_success" != "true" ] || [ "$local_avoided" != "true" ] || [ "$true_remote_execution" != "true" ]; then
+        all_success=false
+    fi
+done
 
-if [ "$WINDOW_SPLIT_SUCCESS" = "t" ]; then
-    SPLIT_SUCCESS=true
-else
-    SPLIT_SUCCESS=false
-fi
-
-echo "Test Results:"
-echo "- Cars table output: $CARS_SUCCESS"
-echo "- Window split correct: $SPLIT_SUCCESS"  
-echo "- Hook extraction: $HOOK_SUCCESS"
-echo "- Remote execution: $REMOTE_SUCCESS"
-echo "- Local execution avoided: $([ "$LOCAL_DETECTED" = false ] && echo true || echo false)"
-
-# Display timing analysis
-analyze_timing "$LOG_TIMES" "$SCRIPT_DURATIONS"
-
-if [ "$CARS_SUCCESS" = true ] && [ "$SPLIT_SUCCESS" = true ] && [ "$HOOK_SUCCESS" = true ] && [ "$REMOTE_SUCCESS" = true ] && [ "$LOCAL_DETECTED" = false ]; then
+echo ""
+if [ "$all_success" = true ]; then
     echo "🎉 OVERALL RESULT: SUCCESS"
-    echo "- All criteria met: cars output, window split, remote execution"
+    echo "- All languages (Python, R, SAS) working with TRUE remote execution"
+    echo "- All criteria met: output detection, window splits, remote execution, hook extraction, USERNAME VERIFICATION"
+    echo "- CONFIRMED: Running as 'eddyhu' on WRDS remote server, NOT 'vwh7mb' locally"
     EXIT_CODE=0
 else
     echo "❌ OVERALL RESULT: FAILURE"
-    echo "- Missing requirements - see details above"
+    echo "- Remote execution verification FAILED"
+    echo "- CRITICAL ISSUE: Tests may be running locally (vwh7mb) instead of remotely (eddyhu)"
+    echo "- Previous 'success' results were FALSE POSITIVES - :dir parameter not working"
+    echo "- See individual results above for specific failure details"
     EXIT_CODE=1
 fi
 
@@ -358,18 +533,37 @@ echo ""
 echo "Debug files:"
 echo "- SAS workflow: ~/sas-workflow-debug.log"
 echo "- Euporie debug: ~/euporie-debug.log"
+echo "- Euporie termint: ~/euporie-termint-debug.log"
 echo "- TRAMP QRSH: ~/tramp-qrsh-debug.log"
 echo "- Screenshot: ~/test-results-screenshot.png"
 
 echo ""
 echo "Recent log entries:"
-echo "--- sas-workflow-debug.log (last 10 lines) ---"
-tail -10 ~/sas-workflow-debug.log 2>/dev/null || echo "No log file found"
+for log_file in "sas-workflow-debug.log" "euporie-debug.log" "euporie-termint-debug.log" "tramp-qrsh-debug.log"; do
+    echo "--- $log_file (last 5 lines) ---"
+    tail -5 ~/$log_file 2>/dev/null || echo "No log file found"
+done
 
-echo "--- euporie-debug.log (last 10 lines) ---"  
-tail -10 ~/euporie-debug.log 2>/dev/null || echo "No log file found"
-
-echo "--- tramp-qrsh-debug.log (last 10 lines) ---"
-tail -10 ~/tramp-qrsh-debug.log 2>/dev/null || echo "No log file found"
+echo ""
+echo "CRITICAL USERNAME ANALYSIS:"
+echo "Expected remote username: eddyhu (on WRDS)"
+echo "Local username: vwh7mb (on macOS)"
+echo "If any output shows 'vwh7mb', the :dir parameter is NOT working and execution fell back to local"
+echo "This means previous 'success' results were actually false positives"
+echo ""
+echo "Buffer content analysis:"
+for language in "${LANGUAGES[@]}"; do
+    echo "--- $language buffer username check ---"
+    emacsclient --eval "(if (get-buffer \"*euporie-$language*\")
+        (with-current-buffer \"*euporie-$language*\"
+          (let ((content (buffer-string)))
+            (cond
+              ((string-match-p \"Username: eddyhu\\\\|User: eddyhu\" content)
+               (message \"✓ $language: Remote username detected (eddyhu)\"))
+              ((string-match-p \"Username: vwh7mb\\\\|User: vwh7mb\" content)
+               (message \"✗ $language: Local username detected (vwh7mb) - FAILURE\"))
+              (t (message \"? $language: No username pattern found in buffer\")))))
+      (message \"✗ $language: Buffer not found\"))" 2>/dev/null || echo "Error checking $language buffer"
+done
 
 exit $EXIT_CODE
