@@ -773,12 +773,25 @@ This function uses ESS patterns but handles cases where original buffer may no l
                                    (if initial-buffer-valid (buffer-name initial-buffer) "<dead-buffer>")
                                    (if console-window "yes" "no"))
         
+        ;; Check if existing console window provides good layout
+        (when (and console-window
+                   (not (and (> (length (window-list)) 1)  ; Multiple windows exist
+                             (< (window-width console-window) (frame-width)))))  ; Console not full-width
+          (euporie-termint-debug-log 'info "Console window exists but layout is poor - recreating split")
+          (condition-case err
+              (progn
+                (delete-window console-window)
+                (setq console-window nil))
+            (error 
+             (euporie-termint-debug-log 'info "Cannot delete sole window, will create split anyway")
+             (setq console-window nil))))
+        
         ;; Save selected window to restore focus later (ESS pattern)
         (save-selected-window
           (cond
-           ;; Case 1: Console window already visible - just switch to it and scroll
+           ;; Case 1: Console window exists with good split layout - reuse it
            (console-window
-            (euporie-termint-debug-log 'info "Reusing existing console window")
+            (euporie-termint-debug-log 'info "Reusing existing console window with good layout")
             (with-selected-window console-window
               (goto-char (point-max))))
            
