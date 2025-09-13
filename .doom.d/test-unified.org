@@ -1,0 +1,120 @@
+# Unified Euporie Architecture Test
+
+This file tests the new unified euporie architecture across all execution contexts.
+
+## Architecture Summary
+
+**Foundation**: Built on tramp-qrsh's proven termint+SSH+qrsh foundation  
+**Approach**: Layer euporie console on established connections  
+**Contexts**: Local, SSH, SSH+qrsh (conditional based on :dir parameter)
+
+## Test 1: Local Python Execution
+
+#+begin_src python
+import sys
+print(f"Python version: {sys.version}")
+print(f"Local execution working!")
+print([1, 2, 3, 4, 5])
+#+end_src
+
+## Test 2: Local R Execution  
+
+#+begin_src R
+print("R local execution working!")
+data(mtcars)
+head(mtcars, 3)
+#+end_src
+
+## Test 3: SSH Remote Python (if available)
+
+#+begin_src python :dir /ssh:user@host:/tmp
+# This will use SSH context (without qrsh)
+import socket
+print(f"Running on: {socket.gethostname()}")
+print("SSH context working!")
+#+end_src
+
+## Test 4: SSH+qrsh Remote SAS (WRDS)
+
+#+begin_src sas :dir /sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2  
+/* This tests the full SSH+qrsh workflow with SAS */
+!whoami
+proc print data=sashelp.cars(obs=3);
+run;
+#+end_src
+
+## Test 5: Unified Function Direct Testing
+
+Elisp test for direct function calls:
+
+#+begin_src emacs-lisp
+;; Test context detection
+(euporie-parse-context nil)                                    ; Should return 'local
+(euporie-parse-context "/tmp/local")                          ; Should return 'local  
+(euporie-parse-context "/ssh:user@host:/path")               ; Should return 'ssh
+(euporie-parse-context "/sshx:wrds|qrsh::/path")             ; Should return 'ssh-qrsh
+
+;; Test kernel mapping
+(euporie-language-to-kernel "python")   ; Should return "python3"
+(euporie-language-to-kernel "r")        ; Should return "ir" 
+(euporie-language-to-kernel "sas")      ; Should return "sas"
+(euporie-language-to-kernel "stata")    ; Should return "stata"
+
+;; Test session conversion
+(euporie-buffer-to-session "*euporie-python*")  ; Should return "euporie-python"
+#+end_src
+
+## Test 6: Interactive Console Starting
+
+Test the interactive function:
+
+#+begin_src emacs-lisp
+;; Start local Python console
+(euporie-start-console "python")
+
+;; Start remote SAS console (if WRDS available)
+;; (euporie-start-console "sas" "/sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2")
+#+end_src
+
+## Expected Behavior
+
+### Local Execution:
+- Uses direct `termint-define` with euporie command
+- Creates buffer named `*euporie-LANGUAGE*`
+- No SSH/qrsh complexity
+
+### SSH Execution:
+- Uses tramp-qrsh foundation but skips qrsh step
+- SSH connection → euporie console startup
+- Proper `eat` backend with graphics support
+
+### SSH+qrsh Execution:  
+- Full tramp-qrsh workflow: SSH → qrsh → euporie console
+- Leverages existing polling and connection detection
+- Handles WRDS multi-hop properly
+
+## Success Criteria
+
+1. ✅ **Context detection works**: Each :dir parameter triggers correct execution path
+2. ✅ **Termint integration**: Uses only termint-generated functions  
+3. ✅ **Error handling**: Graceful failures with informative messages
+4. ✅ **Buffer management**: Proper naming and display
+5. ✅ **Code execution**: Bracketed paste support for multi-line blocks
+
+## Architecture Benefits
+
+- **Builds on proven foundation**: tramp-qrsh already solved the hard parts
+- **Clean separation**: Connection → Console → Execution  
+- **Unified interface**: Same user experience across contexts
+- **Proper termint usage**: No custom process communication
+- **Conditional logic**: Automatic context detection from org-babel parameters
+
+## Implementation Notes
+
+The unified approach eliminates the need for:
+- Separate euporie-python, euporie-sas, etc. functions
+- Custom process communication beyond termint
+- Reinventing SSH/qrsh connection management
+- Complex buffer management schemes
+
+Instead, it layers euporie intelligently on the established tramp-qrsh foundation with conditional logic for different execution contexts.

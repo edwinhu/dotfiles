@@ -445,10 +445,15 @@ echo "Testing languages: ${LANGUAGES[*]}"
 # Initialize results storage using temporary directories
 rm -rf /tmp/test-results /tmp/remote-results 2>/dev/null || true
 
-# Step 1: Kill existing Emacs processes
-echo "Step 1: Killing existing Emacs processes..."
+# Step 1: Kill ALL existing Emacs processes (daemon + GUI)
+echo "Step 1: Killing ALL existing Emacs processes..."
+echo "  - Finding Emacs processes..."
+ps aux | grep -i emacs | grep -v grep || echo "  - No Emacs processes found initially"
+echo "  - Killing all Emacs processes (daemon, GUI, emacsclient)..."
 ps aux | grep -i emacs | grep -v grep | awk '{print $2}' | xargs -r kill -9 2>/dev/null || true
-sleep 2
+sleep 3
+echo "  - Verifying all Emacs processes are terminated..."
+ps aux | grep -i emacs | grep -v grep || echo "  ✓ All Emacs processes terminated successfully"
 
 # Step 2: Clear logs for clean test
 echo "Step 2: Clearing debug logs..."
@@ -457,15 +462,28 @@ echo "Step 2: Clearing debug logs..."
 > ~/euporie-termint-debug.log
 > ~/tramp-qrsh-debug.log 2>/dev/null || true
 
-# Step 3: Start fresh Emacs
-echo "Step 3: Starting fresh Emacs.app..."
+# Step 3: Start fresh Emacs.app ONLY (no daemon)
+echo "Step 3: Starting fresh Emacs.app ONLY..."
 record_phase_start "Emacs_Startup"
-osascript -e 'tell application "Emacs" to activate' &
-sleep 5
+echo "  - Launching Emacs.app (GUI application)..."
+osascript -e 'tell application "Emacs" to activate'
+echo "  - Waiting for Emacs.app to fully start..."
+sleep 8  # Longer wait for full startup
+echo "  - Verifying Emacs.app is running..."
+ps aux | grep -i emacs | grep -v grep | head -3 || echo "  - Warning: No Emacs process detected"
 record_phase_end "Emacs_Startup"
+echo "  ✓ Emacs.app startup completed"
 
-# Step 3a: Configure euporie environment
-echo "Step 3a: Configuring euporie environment in Emacs..."
+# Step 3a: Load unified euporie modules
+echo "Step 3a: Loading unified euporie modules..."
+emacsclient --eval "(progn
+  (message \"=== Loading unified euporie modules ===\")
+  (load \"/Users/vwh7mb/dotfiles-pure-termint/.doom.d/tramp-qrsh.el\")
+  (load \"/Users/vwh7mb/dotfiles-pure-termint/.doom.d/euporie-unified.el\")
+  (message \"✓ Unified modules loaded successfully\"))" 
+
+# Step 3b: Configure euporie environment  
+echo "Step 3b: Configuring euporie environment in Emacs..."
 emacsclient --eval "(progn
   (message \"=== Configuring euporie environment ===\")
   (let ((project-dir \"~/projects/emacs-euporie/\"))

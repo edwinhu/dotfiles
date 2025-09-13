@@ -50,36 +50,27 @@
 ;; - `undefine-key!' for unbinding keys
 
 ;;; ================================================================
-;;;                STREAMLINED EUPORIE INTEGRATION ARCHITECTURE
+;;;                UNIFIED EUPORIE INTEGRATION ARCHITECTURE
 ;;; ================================================================
 
-;; Simple loading approach that was working
+;; Load unified euporie architecture built on tramp-qrsh foundation  
 (let ((doom-dir (or (bound-and-true-p doom-user-dir)
                    (expand-file-name "~/.doom.d/"))))
-  (load (expand-file-name "tramp-qrsh.el" doom-dir))
-  (load (expand-file-name "euporie-termint.el" doom-dir))
-  (load (expand-file-name "ob-sas.el" doom-dir))
-  (load (expand-file-name "ob-stata.el" doom-dir)))
+  (load (expand-file-name "tramp-qrsh.el" doom-dir))      ; Foundation: SSH+qrsh
+  (load (expand-file-name "euporie-unified.el" doom-dir))) ; New: Unified approach
 
-(when (and (featurep 'euporie-termint)
-           (fboundp 'euporie-termint-setup) 
-           (fboundp 'euporie-termint-setup-keybinding))
-  (euporie-termint-setup)
-  (euporie-termint-setup-keybinding))
+;; Global termint configuration
+(setq termint-backend 'eat)
 
-;; Hook into org-mode for org-babel packages
+;; Hook into org-mode for unified euporie integration
 (add-hook 'org-mode-hook 
   (lambda ()
-    ;; Load ob-sas and ob-stata packages when org-mode loads 
-    (use-package! ob-sas :load-path "~/.doom.d/")
-    (use-package! ob-stata :load-path "~/.doom.d/")
-    
     ;; Essential org-babel configuration
     (setq org-src-fontify-natively t
           org-src-preserve-indentation t 
           org-src-tab-acts-natively t)
     
-    ;; Org-babel language support
+    ;; Org-babel language support (now handled by euporie-unified.el)
     (setq org-babel-load-languages '((emacs-lisp . t)
                                      (python . t)
                                      (R . t)
