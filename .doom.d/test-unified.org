@@ -36,7 +36,7 @@ print("SSH context working!")
 
 ## Test 4: SSH+qrsh Remote SAS (WRDS)
 
-#+begin_src sas :dir /sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2  
+#+begin_src sas :dir /sshx:wrds-uva|qrsh::/home/nyu/eddyhu/projects/wander2  
 /* This tests the full SSH+qrsh workflow with SAS */
 !whoami
 proc print data=sashelp.cars(obs=3);
@@ -52,7 +52,7 @@ Elisp test for direct function calls:
 (euporie-parse-context nil)                                    ; Should return 'local
 (euporie-parse-context "/tmp/local")                          ; Should return 'local  
 (euporie-parse-context "/ssh:user@host:/path")               ; Should return 'ssh
-(euporie-parse-context "/sshx:wrds|qrsh::/path")             ; Should return 'ssh-qrsh
+(euporie-parse-context "/sshx:wrds-uva|qrsh::/path")             ; Should return 'ssh-qrsh
 
 ;; Test kernel mapping
 (euporie-language-to-kernel "python")   ; Should return "python3"
@@ -73,7 +73,7 @@ Test the interactive function:
 (euporie-start-console "python")
 
 ;; Start remote SAS console (if WRDS available)
-;; (euporie-start-console "sas" "/sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2")
+;; (euporie-start-console "sas" "/sshx:wrds-uva|qrsh::/home/nyu/eddyhu/projects/wander2")
 #+end_src
 
 ## Expected Behavior

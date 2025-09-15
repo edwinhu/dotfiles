@@ -48,7 +48,7 @@ Returns: 'local, 'ssh, or 'ssh-qrsh"
    ((or (null dir) (not (file-remote-p dir)))
     'local)
    
-   ;; Multi-hop TRAMP path with qrsh (e.g., /sshx:wrds|qrsh::/path)
+   ;; Multi-hop TRAMP path with qrsh (e.g., /sshx:wrds-uva|qrsh::/path)
    ((and (file-remote-p dir)
          (string-match-p "|qrsh::" dir))
     'ssh-qrsh)
