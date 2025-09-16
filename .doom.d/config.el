@@ -53,11 +53,10 @@
 ;;;                UNIFIED EUPORIE INTEGRATION ARCHITECTURE
 ;;; ================================================================
 
-;; Load unified euporie architecture built on tramp-qrsh foundation  
+;; Load euporie termint integration
 (let ((doom-dir (or (bound-and-true-p doom-user-dir)
                    (expand-file-name "~/.doom.d/"))))
-  (load (expand-file-name "tramp-qrsh.el" doom-dir))      ; Foundation: SSH+qrsh
-  (load (expand-file-name "euporie-unified.el" doom-dir))) ; New: Unified approach
+  (load (expand-file-name "euporie-termint.el" doom-dir)))
 
 ;; Global termint configuration
 (setq termint-backend 'eat)
@@ -86,8 +85,37 @@
   ;; CRITICAL: Popup rules for org-src buffers - required for org-edit-src-code
   (set-popup-rule! "^\\*Org Src" :ignore t)
   (set-popup-rule! "^\\*SAS Console" :ignore t)
+
+  ;; Note: Keybindings moved to hooks at end of file for proper override
   )
 
 ;; Claude Code IDE configuration (moved to separate file for better organization)
 (load! "claude-code-config")
+
+;; Load SAS org-babel integration
+(load! "ob-sas")
+
+;;; ================================================================
+;;;                          KEYBINDINGS
+;;; ================================================================
+
+;; Set up Shift-Enter keybinding for euporie in org-src buffers (avoiding Doom C-RET conflicts)
+(add-hook 'org-src-mode-hook
+  (lambda ()
+    (local-set-key (kbd "S-RET") #'euporie-send-region-or-paragraph)
+    (local-set-key (kbd "S-<return>") #'euporie-send-region-or-paragraph)))
+
+;; Also add to major mode hooks as backup
+(defun euporie-setup-keybindings ()
+  "Set up Shift-Enter keybindings for euporie in source code buffers."
+  ;; Set keybindings in any org-src buffer or when babel-info is available
+  (when (or (and (boundp 'org-src--babel-info) org-src--babel-info)
+            (string-match-p "\\*Org Src" (buffer-name)))
+    (local-set-key (kbd "S-RET") #'euporie-send-region-or-paragraph)
+    (local-set-key (kbd "S-<return>") #'euporie-send-region-or-paragraph)))
+
+(add-hook 'python-mode-hook #'euporie-setup-keybindings)
+(add-hook 'ess-r-mode-hook #'euporie-setup-keybindings)
+(add-hook 'SAS-mode-hook #'euporie-setup-keybindings)
+(add-hook 'stata-mode-hook #'euporie-setup-keybindings)
 
