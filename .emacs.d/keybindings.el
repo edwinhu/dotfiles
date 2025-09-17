@@ -104,9 +104,9 @@
   ;; Explorer (file manager)
   "e"   '(:ignore t :which-key "Explorer")
   "ee"  '(dirvish :which-key "Open dirvish")
-  "eq"  '(dirvish-quit :which-key "Quit dirvish")
+  "em"  '(dirvish-dispatch :which-key "Dirvish menu")
   "eE"  '(dirvish-side :which-key "Dirvish sidebar")
-  "ed"  '(dirvish-dispatch :which-key "Dirvish dispatch")
+  "ed"  '(dirvish-quit :which-key "Quit dirvish")
 
   ;; Help (LazyVim-inspired)
   "h"   '(:ignore t :which-key "Help")

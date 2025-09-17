@@ -354,6 +354,9 @@
         '(nerd-icons file-time file-size collapse subtree-state vc-state git-msg))
   (setq delete-by-moving-to-trash t)
 
+  ;; Make dirvish-quit actually kill all buffers instead of just burying them
+  (setq dirvish-reuse-session nil)
+
   ;; Custom eza preview for directories
   (dirvish-define-preview eza (file)
     "Use `eza' to generate directory preview."
@@ -372,7 +375,9 @@
   (add-hook 'dired-mode-hook
             (lambda ()
               (when (bound-and-true-p display-line-numbers-mode)
-                (display-line-numbers-mode -1)))))
+                (display-line-numbers-mode -1))))
+
+)
 
 ;; Global hook to disable line numbers in special buffers
 (defun disable-line-numbers-in-special-buffers ()
