@@ -48,6 +48,7 @@
 (global-auto-revert-mode 1)             ; Automatically reload files (LazyVim-style)
 (delete-selection-mode 1)               ; Replace selected text when typing
 (electric-pair-mode 1)                  ; Auto-pair parentheses
+(recentf-mode 1)                        ; Track recently opened files
 (show-paren-mode 1)                     ; Highlight matching parentheses
 (column-number-mode 1)                  ; Show column number in mode line
 (global-display-line-numbers-mode 1)    ; Show line numbers
