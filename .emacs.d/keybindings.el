@@ -44,7 +44,7 @@
   "f"   '(:ignore t :which-key "Files")
   "ff"  '(find-file :which-key "Find files")
   "fn"  '(find-file :which-key "New file")
-  "fr"  '(recentf-open-files :which-key "Recent files")
+  "fr"  '(consult-recent-file :which-key "Recent files")
   "fs"  '(save-buffer :which-key "Save file")
   "fS"  '(save-some-buffers :which-key "Save all files")
   "fc"  '(open-config :which-key "Find config file")
@@ -52,7 +52,7 @@
 
   ;; Buffers (LazyVim-inspired)
   "b"   '(:ignore t :which-key "Buffers")
-  "bb"  '(switch-to-buffer :which-key "Switch to other buffer")
+  "bb"  '(consult-buffer :which-key "Switch to other buffer")
   "bd"  '(kill-current-buffer :which-key "Delete buffer")
   "bD"  '(kill-buffer :which-key "Delete buffer (choose)")
   "bo"  '(kill-other-buffers :which-key "Delete other buffers")
@@ -100,6 +100,13 @@
   "cf"  '(format-buffer :which-key "Format")
   "ca"  '(eglot-code-actions :which-key "Code action")
   "cr"  '(eglot-rename :which-key "Rename")
+
+  ;; Explorer (file manager)
+  "e"   '(:ignore t :which-key "Explorer")
+  "ee"  '(dirvish :which-key "Open dirvish")
+  "eq"  '(dirvish-quit :which-key "Quit dirvish")
+  "eE"  '(dirvish-side :which-key "Dirvish sidebar")
+  "ed"  '(dirvish-dispatch :which-key "Dirvish dispatch")
 
   ;; Help (LazyVim-inspired)
   "h"   '(:ignore t :which-key "Help")
@@ -189,6 +196,28 @@
 ;; For terminals or when focus hooks aren't available
 (when (not window-system)
   (run-with-timer 2 2 'check-buffer-on-focus))
+
+;;; Euporie Integration Keybindings
+
+;; Set up Shift-Enter keybinding for euporie in org-src buffers
+(add-hook 'org-src-mode-hook
+  (lambda ()
+    (local-set-key (kbd "S-RET") #'euporie-send-region-or-paragraph)
+    (local-set-key (kbd "S-<return>") #'euporie-send-region-or-paragraph)))
+
+;; Also add to major mode hooks as backup
+(defun euporie-setup-keybindings ()
+  "Set up Shift-Enter keybindings for euporie in source code buffers."
+  ;; Set keybindings in any org-src buffer or when babel-info is available
+  (when (or (and (boundp 'org-src--babel-info) org-src--babel-info)
+            (string-match-p "\\*Org Src" (buffer-name)))
+    (local-set-key (kbd "S-RET") #'euporie-send-region-or-paragraph)
+    (local-set-key (kbd "S-<return>") #'euporie-send-region-or-paragraph)))
+
+(add-hook 'python-mode-hook #'euporie-setup-keybindings)
+(add-hook 'ess-r-mode-hook #'euporie-setup-keybindings)
+(add-hook 'SAS-mode-hook #'euporie-setup-keybindings)
+(add-hook 'stata-mode-hook #'euporie-setup-keybindings)
 
 (provide 'keybindings)
 ;;; keybindings.el ends here

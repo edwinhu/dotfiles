@@ -225,6 +225,14 @@
   :config
   (setq vertico-cycle t))
 
+;; Vertico Posframe - Show vertico in a child frame
+(use-package vertico-posframe
+  :config
+  (setq vertico-posframe-parameters
+        '((left-fringe . 8)
+          (right-fringe . 8)))
+  (vertico-posframe-mode 1))
+
 ;; Orderless - Flexible completion style
 (use-package orderless
   :config
@@ -368,11 +376,18 @@
 
 ;; Global hook to disable line numbers in special buffers
 (defun disable-line-numbers-in-special-buffers ()
-  "Disable line numbers in dashboard, dirvish, and other special buffers."
+  "Disable line numbers in dashboard, dirvish, euporie-termint, terminal buffers, and other special buffers."
   (when (or (string-match-p "^\\*dashboard\\*" (buffer-name))
             (string-match-p "^\\*dirvish" (buffer-name))
+            (string-match-p "^\\*euporie" (buffer-name))
+            (string-match-p "^\\*vterm" (buffer-name))
+            (string-match-p "^\\*eat" (buffer-name))
+            (string-match-p "^\\*term" (buffer-name))
             (derived-mode-p 'dired-mode)
-            (derived-mode-p 'dirvish-mode))
+            (derived-mode-p 'dirvish-mode)
+            (derived-mode-p 'vterm-mode)
+            (derived-mode-p 'eat-mode)
+            (derived-mode-p 'term-mode))
     (when (bound-and-true-p display-line-numbers-mode)
       (display-line-numbers-mode -1))))
 
