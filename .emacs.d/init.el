@@ -146,6 +146,13 @@
   :config
   (global-evil-surround-mode 1))
 
+;; Evil Commentary - Comment/uncomment with gc
+(use-package evil-commentary
+  :straight (:host github :repo "linktohack/evil-commentary")
+  :after evil
+  :config
+  (evil-commentary-mode))
+
 ;; Which-key - Show available keybindings
 (use-package which-key
   :init (which-key-mode)
@@ -232,10 +239,15 @@
   (marginalia-mode))
 
 ;; Consult - Enhanced search and navigation
-(use-package consult)
+(use-package consult
+  :straight t)
+
+;; Install embark-consult separately
+(straight-use-package 'embark-consult)
 
 ;; Embark - Action-based completion interface
 (use-package embark
+  :straight t
   :init
   ;; Optionally replace the key help with a completing-read interface
   (setq prefix-help-command #'embark-prefix-help-command)
@@ -245,11 +257,6 @@
                '("\\`\\*Embark Collect \\(Live\\|Completions\\)\\*"
                  nil
                  (window-parameters (mode-line-format . none)))))
-
-;; Embark-Consult integration
-(use-package embark-consult
-  :hook
-  (embark-collect-mode . consult-preview-at-point-mode))
 
 ;; Vertico - Better minibuffer completion
 (use-package vertico
