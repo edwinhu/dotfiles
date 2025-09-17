@@ -77,6 +77,38 @@
   :config
   (load-theme 'catppuccin :no-confirm))
 
+;; Doom Modeline - Enhanced modeline
+(use-package doom-modeline
+  :straight (:host github :repo "seagle0128/doom-modeline")
+  :init
+  (doom-modeline-mode 1)
+  :config
+  (setq doom-modeline-height 25
+        doom-modeline-bar-width 4
+        doom-modeline-icon t
+        doom-modeline-major-mode-icon t
+        doom-modeline-major-mode-color-icon t
+        doom-modeline-buffer-file-name-style 'truncate-upto-project
+        doom-modeline-buffer-state-icon t
+        doom-modeline-buffer-modification-icon t
+        doom-modeline-unicode-fallback nil
+        doom-modeline-minor-modes nil
+        doom-modeline-enable-word-count nil
+        doom-modeline-continuous-word-count-modes '(markdown-mode gfm-mode org-mode)
+        doom-modeline-buffer-encoding t
+        doom-modeline-indent-info nil
+        doom-modeline-checker-simple-format t
+        doom-modeline-number-limit 99
+        doom-modeline-vcs-max-length 12
+        doom-modeline-persp-name t
+        doom-modeline-display-default-persp-name nil
+        doom-modeline-lsp t
+        doom-modeline-github nil
+        doom-modeline-mu4e nil
+        doom-modeline-irc t
+        doom-modeline-modal-icon t
+        doom-modeline-env-version t))
+
 ;; Evil mode - Vim emulation
 (use-package evil
   :init
@@ -105,6 +137,13 @@
   :after evil
   :config
   (evil-collection-init))
+
+;; Evil Surround - Surround text objects with delimiters
+(use-package evil-surround
+  :straight (:host github :repo "emacs-evil/evil-surround")
+  :after evil
+  :config
+  (global-evil-surround-mode 1))
 
 ;; Which-key - Show available keybindings
 (use-package which-key
@@ -201,6 +240,48 @@
 ;; Consult - Enhanced search and navigation
 (use-package consult)
 
+;; Company Mode - Text completion framework
+(use-package company
+  :straight (:host github :repo "company-mode/company-mode")
+  :init
+  (global-company-mode 1)
+  :config
+  (setq company-idle-delay 0.2
+        company-minimum-prefix-length 2
+        company-show-quick-access t
+        company-selection-wrap-around t
+        company-dabbrev-downcase nil
+        company-dabbrev-ignore-case nil
+        company-dabbrev-code-other-buffers t
+        company-tooltip-align-annotations t
+        company-require-match 'never
+        company-global-modes '(not erc-mode message-mode help-mode gud-mode)
+        company-backends '((company-files company-keywords company-capf company-dabbrev-code company-etags company-dabbrev))))
+
+;; Project.el - Use built-in version to avoid conflicts
+(use-package project
+  :straight nil)
+
+;; Flymake - Use built-in version to avoid conflicts
+(use-package flymake
+  :straight nil)
+
+;; Xref - Use built-in version to avoid conflicts
+(use-package xref
+  :straight nil)
+
+;; Eglot - Built-in LSP client
+(use-package eglot
+  :straight nil
+  :after (project flymake xref)
+  :config
+  (setq eglot-autoshutdown t
+        eglot-confirm-server-initiated-edits nil
+        eglot-extend-to-xref t)
+  ;; Auto-start eglot for common programming modes
+  (add-hook 'python-mode-hook 'eglot-ensure)
+  )
+
 ;; Magit - Git integration
 (use-package magit)
 
@@ -221,11 +302,81 @@
   :config
   (exec-path-from-shell-initialize))
 
+;; Literate Calc Mode - Interactive calculations in text
+(use-package literate-calc-mode
+  :straight (:host github :repo "sulami/literate-calc-mode.el")
+  :config
+  ;; Enable for *scratch* buffer by default
+  (add-hook 'lisp-interaction-mode-hook 'literate-calc-mode)
+  ;; Enable for initial scratch buffer
+  (with-current-buffer "*scratch*"
+    (literate-calc-mode)))
+
 ;; Termint - Terminal integration
 (use-package termint
   :straight (:host github :repo "milanglacier/termint.el")
   :config
   (setq termint-backend 'eat))
+
+;; Nerd Icons - Required for dirvish
+(use-package nerd-icons
+  :config
+  ;; Run nerd-icons-install-fonts if icons don't display properly
+  )
+
+;; Dirvish - Modern file manager
+(use-package dirvish
+  :straight (:host github :repo "alexluigit/dirvish")
+  :after nerd-icons
+  :init
+  (dirvish-override-dired-mode)
+  :config
+  ;; Use eza for directory listings
+  (setq dired-listing-switches
+        "-l --almost-all --human-readable --group-directories-first --no-group")
+
+  (setq dirvish-quick-access-entries
+        '(("h" "~/" "Home")
+          ("d" "~/Downloads/" "Downloads")
+          ("m" "/mnt/" "Drives")
+          ("t" "/tmp/" "Temp")))
+  (setq dirvish-mode-line-format
+        '(:left (sort symlink) :right (omit yank index)))
+  (setq dirvish-attributes
+        '(nerd-icons file-time file-size collapse subtree-state vc-state git-msg))
+  (setq delete-by-moving-to-trash t)
+
+  ;; Custom eza preview for directories
+  (dirvish-define-preview eza (file)
+    "Use `eza' to generate directory preview."
+    :require ("eza")
+    (when (file-directory-p file)
+      `(shell . ("eza" "--color=always" "-al" ,file))))
+
+  (add-to-list 'dirvish-preview-dispatchers 'eza)
+
+  ;; Disable line numbers in dirvish and dired buffers
+  (add-hook 'dirvish-mode-hook
+            (lambda ()
+              (when (bound-and-true-p display-line-numbers-mode)
+                (display-line-numbers-mode -1))))
+
+  (add-hook 'dired-mode-hook
+            (lambda ()
+              (when (bound-and-true-p display-line-numbers-mode)
+                (display-line-numbers-mode -1)))))
+
+;; Global hook to disable line numbers in special buffers
+(defun disable-line-numbers-in-special-buffers ()
+  "Disable line numbers in dashboard, dirvish, and other special buffers."
+  (when (or (string-match-p "^\\*dashboard\\*" (buffer-name))
+            (string-match-p "^\\*dirvish" (buffer-name))
+            (derived-mode-p 'dired-mode)
+            (derived-mode-p 'dirvish-mode))
+    (when (bound-and-true-p display-line-numbers-mode)
+      (display-line-numbers-mode -1))))
+
+(add-hook 'buffer-list-update-hook #'disable-line-numbers-in-special-buffers)
 
 ;; Load custom configurations after dependencies are ready
 (let ((config-dir user-emacs-directory))
@@ -281,8 +432,17 @@
     (insert " → Find file\n")
 
     (widget-create 'item
+                   :tag "  SPC f r"
+                   :action '(lambda (&rest ignore) (call-interactively 'consult-recent-file))
+                   :mouse-face 'highlight
+                   :button-face 'dashboard-text-banner-face
+                   :help-echo "Recent files"
+                   :format "%[%t%]")
+    (insert " → Recent files\n")
+
+    (widget-create 'item
                    :tag "  SPC b b"
-                   :action '(lambda (&rest ignore) (call-interactively 'switch-to-buffer))
+                   :action '(lambda (&rest ignore) (call-interactively 'consult-buffer))
                    :mouse-face 'highlight
                    :button-face 'dashboard-text-banner-face
                    :help-echo "Switch buffer"
@@ -308,6 +468,15 @@
     (insert " → Grep (Root Dir)\n")
 
     (widget-create 'item
+                   :tag "  SPC e e"
+                   :action '(lambda (&rest ignore) (call-interactively 'dirvish))
+                   :mouse-face 'highlight
+                   :button-face 'dashboard-text-banner-face
+                   :help-echo "File explorer"
+                   :format "%[%t%]")
+    (insert " → File explorer\n")
+
+    (widget-create 'item
                    :tag "  SPC r  "
                    :action '(lambda (&rest ignore) (call-interactively 'reload-config))
                    :mouse-face 'highlight
@@ -319,7 +488,6 @@
   ;; Add custom section to dashboard
   (add-to-list 'dashboard-item-generators '(keybindings . dashboard-insert-custom-keybindings))
   (setq dashboard-items '((keybindings . t)
-                         (recents . 5)
                          (projects . 5)
                          (bookmarks . 3)))
 

@@ -1,7 +1,7 @@
 ;;; claude-code-config.el --- Claude Code IDE configuration for vanilla Emacs -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Adapted for vanilla Emacs without Doom dependencies
+;; Claude Code IDE configuration for vanilla Emacs without Doom dependencies
 
 ;;; Code:
 
@@ -9,80 +9,48 @@
 (use-package claude-code-ide
   :straight (:host github :repo "manzaltu/claude-code-ide.el")
   :config
-  (when (fboundp 'claude-code-ide-emacs-tools-setup)
-    (claude-code-ide-emacs-tools-setup))
-  (setq claude-code-ide-window-width 140
-        claude-code-ide-terminal-backend 'vterm
-        claude-code-ide-vterm-anti-flicker t))
+  ;; Display Claude Code buffers in right side window
+  (add-to-list 'display-buffer-alist
+               '("^\\*claude"
+                 (display-buffer-in-side-window)
+                 (side . right)
+                 (window-width . 90)))
+
+  ;; Disable visual modes that interfere with Claude Code IDE terminal
+  (defun claude-code-ide-buffer-setup ()
+    "Setup Claude Code IDE buffer configuration."
+    (when (string-match-p "^\\*claude" (buffer-name))
+      ;; Disable whitespace visualization that can interfere with Unicode
+      (when (bound-and-true-p whitespace-mode)
+        (whitespace-mode -1))
+      ;; Disable line numbers
+      (when (bound-and-true-p display-line-numbers-mode)
+        (display-line-numbers-mode -1))
+      ;; Disable trailing whitespace visualization
+      (setq-local show-trailing-whitespace nil)
+      ;; Disable non-breaking char display that can interfere with Unicode
+      (setq-local nobreak-char-display nil)))
+
+  (add-hook 'buffer-list-update-hook #'claude-code-ide-buffer-setup)
+  )
 
 ;; Add to leader key bindings - outside use-package to ensure they load immediately
 (when (fboundp 'my-leader-def)
   (my-leader-def
     "a"   '(:ignore t :which-key "Claude Code")
-    "am"  '(claude-code-ide-menu :which-key "Menu")
-    "as"  '(claude-code-ide--start-if-no-session :which-key "Start new session")
-    "ac"  '(claude-code-ide-continue :which-key "Continue")
-    "ar"  '(claude-code-ide-resume :which-key "Resume")
+    "ac"  '(claude-code-ide :which-key "Start Claude Code IDE")
+    "ad"  '(claude-code-ide-stop :which-key "Stop Claude Code IDE")
+    "ar"  '(claude-code-ide-resume :which-key "Resume Claude Code IDE")
+    "as"  '(claude-code-ide-send-prompt :which-key "Send prompt")
+    "at"  '(claude-code-ide-toggle :which-key "Toggle Claude Code window")
+    "ab"  '(claude-code-ide-switch-to-buffer :which-key "Switch to Claude buffer")
+    "am"  '(claude-code-ide-menu :which-key "Claude Code IDE menu")
+
+    ;; YOLO mode submenu
     "ay"  '(:ignore t :which-key "YOLO mode")
-    "ay s" '(claude-code-ide-yolo-start :which-key "Start")
-    "ay c" '(claude-code-ide-yolo-continue :which-key "Continue")
-    "ay r" '(claude-code-ide-yolo-resume :which-key "Resume")
-    "ab"  '(claude-code-ide-switch-to-buffer :which-key "Switch to buffer")
-    "ap"  '(claude-code-ide-send-prompt :which-key "Send prompt")
-    "al"  '(claude-code-ide-list-sessions :which-key "List sessions")))
-
-;; Custom yolo mode functions
-(defun claude-code-ide-yolo-start ()
-  "Start Claude Code in YOLO mode (bypass permissions)."
-  (interactive)
-  (let ((claude-code-ide-cli-extra-flags "--dangerously-skip-permissions"))
-    (claude-code-ide--start-if-no-session)))
-
-(defun claude-code-ide-yolo-continue ()
-  "Continue Claude Code session in YOLO mode (bypass permissions)."
-  (interactive)
-  (let ((claude-code-ide-cli-extra-flags "--dangerously-skip-permissions"))
-    (claude-code-ide-continue)))
-
-(defun claude-code-ide-yolo-resume ()
-  "Resume Claude Code session in YOLO mode (bypass permissions)."
-  (interactive)
-  (let ((claude-code-ide-cli-extra-flags "--dangerously-skip-permissions"))
-    (claude-code-ide-resume)))
-
-;; Prevent whitespace mode issues in terminals (Claude Code IDE specific)
-(with-eval-after-load 'whitespace
-  ;; Ensure whitespace mode doesn't interfere with Claude Code IDE terminals
-  (setq whitespace-global-modes '(not vterm-mode eat-mode term-mode)))
-
-;; Configure vterm for better Unicode handling (like Doom config)
-(with-eval-after-load 'vterm
-  (add-hook 'vterm-mode-hook
-            (lambda ()
-              ;; Disable whitespace visualization that can interfere with Unicode
-              (when (fboundp 'whitespace-mode) (whitespace-mode -1))
-              (when (fboundp 'global-whitespace-mode) (global-whitespace-mode -1))
-              (setq-local show-trailing-whitespace nil)
-              (setq-local nobreak-char-display nil)
-              ;; Also disable any other whitespace highlighting
-              (setq-local whitespace-display-mappings nil)
-              (setq-local indicate-empty-lines nil)
-              (setq-local indicate-buffer-boundaries nil)
-
-)))
-
-;; Additional fix: Disable whitespace in claude-code buffers specifically
-(defun claude-code-disable-whitespace ()
-  "Disable all whitespace visualization in Claude Code buffers."
-  (when (and (buffer-name)
-             (string-match-p "\\*claude-code" (buffer-name)))
-    (when (fboundp 'whitespace-mode) (whitespace-mode -1))
-    (setq-local show-trailing-whitespace nil)
-    (setq-local nobreak-char-display nil)
-    (setq-local whitespace-display-mappings nil)))
-
-(add-hook 'buffer-list-update-hook 'claude-code-disable-whitespace)
-
+    "ays" '(claude-code-ide-yolo-start :which-key "YOLO start")
+    "ayc" '(claude-code-ide-yolo-continue :which-key "YOLO continue")
+    "ayr" '(claude-code-ide-yolo-resume :which-key "YOLO resume")))
 
 (provide 'claude-code-config)
 ;;; claude-code-config.el ends here
