@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/evil-collection/modes/thread/evil-collection-thread.el

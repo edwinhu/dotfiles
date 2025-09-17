@@ -1,0 +1,9 @@
+# Stow configuration file
+--target=$HOME
+--ignore=\.git
+--ignore=\.gitignore
+--ignore=README\.md
+--ignore=CLAUDE\.md
+--ignore=.*\.png
+--ignore=.*\.log
+--ignore=scripts

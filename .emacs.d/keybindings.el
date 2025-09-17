@@ -120,6 +120,13 @@
   "qq"  '(save-buffers-kill-terminal :which-key "Quit all")
   "qQ"  '(kill-emacs :which-key "Force quit Emacs")
 
+  ;; Embark actions (first unbind any existing . binding)
+  "."   nil  ; Unbind existing binding
+  "."   '(:ignore t :which-key "Embark")
+  ".."  '(embark-act :which-key "Act")
+  ".;"  '(embark-dwim :which-key "DWIM")
+  ".m"  '(embark-bindings :which-key "Show bindings")
+
   ;; System
   "r"   '(reload-config :which-key "Reload config")
   "R"   '(revert-buffer :which-key "Reload file"))

@@ -1,0 +1,8 @@
+layout {
+    default_tab_template {
+        children
+        pane size=1 borderless=true {
+            // No plugin, just empty status bar space
+        }
+    }
+}

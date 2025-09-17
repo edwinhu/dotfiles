@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__beeper__search_chats"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

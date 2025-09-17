@@ -83,11 +83,7 @@ dotfiles/
 - When working with marimo notebooks, check the `__marimo__` folder for the `.ipynb` file with the same filename
 - These `.ipynb` files contain the inputs/outputs for debugging purposes and any relevant images
 
-### Euporie Console Integration Architecture (CURRENT FOCUS: SAS Integration)
-
-#### Current Priority: SAS Remote Execution with TRAMP
-
-**ACTIVE ISSUE**: Complete SAS integration with euporie, org-babel, and remote TRAMP execution.
+### Euporie Console Integration Architecture
 
 #### Technical Stack
 
@@ -99,51 +95,18 @@ dotfiles/
   - Python: `euporie console --kernel-name=python3`
   - R: `euporie console --kernel-name=ir`
   - Stata: `euporie console --kernel-name=stata`
-  - **SAS: `euporie console --kernel-name=sas` (NEW)**
-- **Environment**: TERM=eat-truecolor COLORTERM=truecolor EUPORIE_GRAPHICS=sixel
+  - SAS: `euporie console --kernel-name=sas`
+- **Environment**: TERM=xterm256-color
 - **CRITICAL**: Always use eat backend - vterm will break inline graphics display
 - **CRITICAL**: Always use termint and not comint, because comint does not support bracketed paste
-- **TRAMP Support**: Remote execution via `:dir /sshx:host|qrsh::/path` in org-babel blocks
-
-#### SAS Kernel Integration (PARTIALLY WORKING - :dir PARAMETER ISSUE)
-
-**Implementation Status**:
-✅ **COMPLETED**: Unified buffer approach (*euporie-sas* only, no duplicates)  
-✅ **COMPLETED**: Fixed termint-define macro with eval backtick syntax  
-✅ **COMPLETED**: Remote TRAMP+QRSH connection established successfully  
-❌ **CRITICAL ISSUE**: :dir parameter not passed from org-babel to SAS functions
-
-**Current Problem**:
-SAS execution defaults to local instead of remote because `dir: nil` is passed to `euporie-sas-start` instead of the TRAMP path `/sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2`.
-
-**Evidence from Debug Logs**:
-```
-[2025-09-02 17:00:56] [INFO] === euporie-sas-start called with dir: nil ===
-[2025-09-02 17:00:56] [DEBUG] SAS start - is-remote: nil, buffer-name: *euporie-sas*
-[2025-09-02 17:00:56] [INFO] Calling euporie-sas-start-local
-```
-
-**Expected Behavior**:
-```
-[INFO] === euporie-sas-start called with dir: /sshx:wrds|qrsh::/home/nyu/eddyhu/projects/wander2 ===
-[DEBUG] SAS start - is-remote: /qrsh:wrds:, buffer-name: *euporie-sas*
-[INFO] Calling euporie-sas-start-remote
-```
-
-**Root Cause**: :dir parameter extraction from org-babel works correctly, but the parameter is not being passed through the call chain to the SAS startup functions.
+- **TRAMP Support**: Remote execution via `:dir /sshx:host|qrsh::/path` in org-babel blocks or without the |qrsh::/ for sshx:rjds for example.
 
 **Key Files**:
 
-- `euporie-termint.el` - Unified SAS integration with TRAMP support ✅
+- `euporie-unified.el` - Unified SAS integration with TRAMP support ✅
 - `tramp-qrsh.el` - TRAMP and QRSH support with custom buffer naming ✅  
 - `ob-sas.el` - SAS-mode integration and language alias mapping ✅
 - `config.el` - Language mode mapping: "sas" → `SAS-mode` ✅
-
-**TRAMP Remote Execution** (Working when :dir is passed correctly):
-
-- Path detection: `(file-remote-p dir)` for any TRAMP path ✅
-- Process creation: Custom buffer naming with `tramp-wrds-termint(nil "*euporie-sas*")` ✅
-- Communication: `termint-euporie-sas-send-string` for unified buffer ✅
 
 #### Buffer Management
 
@@ -164,60 +127,16 @@ SAS execution defaults to local instead of remote because `dir: nil` is passed t
 
 **FOCUS**: SAS integration using the same proven stack (eat, termint, sas_kernel, euporie, org-babel) with additional TRAMP+QRSH remote execution support.
 
-**MANDATORY TESTING PROTOCOL**: 
+**MANDATORY TESTING PROTOCOL**:
 Always run the automated test script `~/.doom.d/test.sh` when debugging C-RET :dir parameter issues. Use a sub-agent to:
+
 1. Execute the test script: `cd ~/.doom.d && ./test.sh`
-2. Check the screenshot at `~/test-results-screenshot.png` 
+2. Check the screenshot at `~/test-results-screenshot.png`
 3. Analyze logs for success criteria:
    - SUCCESS: Screenshot shows cars output AND logs show remote execution
    - FAILURE: No cars output OR logs show `dir: nil` (local execution)
 
 **CRITICAL**: Main Claude's role is ONLY orchestration and planning. Always delegate to specialized agents:
-
-#### 1. **euporie-developer Agent** (SAS Implementation)
-
-- **Scope**: Implement SAS kernel integration features
-- **Focus**:
-  - SAS kernel integration with euporie-termint.el
-  - TRAMP+QRSH remote execution using `file-remote-p` and `start-file-process`
-  - org-babel integration with `:dir` parameter support
-  - SAS-mode integration and language aliases
-- **Stack**: eat backend, termint, sas_kernel, euporie console
-- **Deliverables**: Working SAS integration with local/remote execution
-- **Files**: `euporie-termint.el`, `ob-sas.el`, `config.el`
-
-#### 2. **euporie-tester Agent** (SAS Validation)
-
-- **Scope**: Comprehensive testing of SAS integration
-- **Focus**:
-  - Remote TRAMP execution validation
-  - org-babel block execution testing
-  - Cross-language compatibility checks
-- **Test Cases**:
-  - `#+begin_src sas` (local)
-  - `#+begin_src sas :dir /sshx:host|qrsh::/path` (remote)
-  - C-RET keybinding functionality
-  - Buffer management and process lifecycle
-- **Deliverables**: Test reports with pass/fail analysis
-
-#### 3. **Main Claude** (Orchestration ONLY)
-
-- **Plan features**: Define SAS integration requirements
-- **Coordinate agents**: Manage develop → test cycles  
-- **Evaluate results**: Analyze outcomes and plan refinements
-- **User interaction**: Gather feedback and refine requirements
-- **NEVER directly code**: Always delegate to specialized agents
-
-#### **SAS Integration Workflow**
-
-1. **Developer** → Implements SAS kernel features with TRAMP support
-2. **Tester** → Validates local and remote execution
-3. **Main Claude** → Evaluates results and plans iterations
-
-**Examples**:
-
-- Implementation: "Use the euporie-developer agent to implement SAS kernel integration with TRAMP remote execution support"  
-- Validation: "Use the euporie-tester agent to test SAS integration with both local and remote execution scenarios"
 
 ### Screenshots and Screen Capture
 
@@ -343,6 +262,7 @@ emacsclient --eval "(progn
 **MANDATORY**: Before claiming anything works, you MUST verify by checking:
 
 1. **Debug Log Files**: Always check recent entries in debug log files:
+
    ```bash
    tail -20 /Users/vwh7mb/sas-workflow-debug.log
    tail -20 /Users/vwh7mb/tramp-qrsh-debug.log  
@@ -350,6 +270,7 @@ emacsclient --eval "(progn
    ```
 
 2. **Actual Buffer Content**: Check what's actually in the buffers:
+
    ```bash
    emacsclient --eval "(if (get-buffer \"*euporie-sas*\")
        (with-current-buffer \"*euporie-sas*\"
@@ -358,19 +279,22 @@ emacsclient --eval "(progn
    ```
 
 3. **Process Status**: Verify processes are actually running:
+
    ```bash
    emacsclient --eval "(if (get-buffer \"*euporie-sas*\")
        (get-buffer-process \"*euporie-sas*\")
      \"Buffer not found\")"
    ```
 
-**CRITICAL RULE**: 
+**CRITICAL RULE**:
+
 - **NEVER** claim "it works" without checking logs and buffer content
 - **NEVER** assume success based on code changes alone  
 - **ALWAYS** verify actual execution results and error messages
 - **REMEMBER**: User will check logs and will know if you didn't verify
 
 **Example Verification Pattern**:
+
 ```bash
 # 1. Check what actually happened in logs
 tail -10 /Users/vwh7mb/sas-workflow-debug.log
@@ -492,3 +416,7 @@ When testing functions that create buffers (especially those with running proces
 ```
 
 **Important**: Regular `kill-buffer` will prompt for confirmation when buffers have running processes (like termint sessions with euporie console). Always use the `kill-buffer-query-functions nil` approach for automated testing. This is especially important for euporie-termint.el buffers which maintain persistent euporie console processes with eat backend.
+
+- CPR warnings are not cosmetic, they make sending code to the buffer impossible
+- CRITICAL: Use existing test scripts before writing new ones, for example if we have a test.sh always use that. Read it and recommend whether we need to make updates based on what we are currently working on, but otherwise use what we already have!
+

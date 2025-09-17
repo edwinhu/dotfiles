@@ -37,7 +37,9 @@ nix run .#build-switch
 
 ### Taking Notes
 
-If I ask you to write up notes, write them up in markdown format and append to the file in `~/Documents/Notes/Logseq/journals/{YYYY_MM_DD}.md`, under the appropriate heading (e.g., # Work, # Reading, # Meetings, or # To-Dos) and start the heading level at ##.
+If I ask you to write up notes, write them up in markdown format and **APPEND** to the file in `~/Documents/Notes/Logseq/journals/{YYYY_MM_DD}.md`, under the appropriate heading (e.g., # Work, # Reading, # Meetings, or # To-Dos) and start the heading level at ##.
+
+**CRITICAL**: Always use the Edit tool to APPEND content, never overwrite existing journal entries. The journal may already contain other sections and content that must be preserved.
 
 I use Logseq for note-taking, which is slightly non-standard markdown. Logseq is an outliner. Each bullet (-) is a block, which you can best compare to a paragraph. Because Logseq is an outliner, every paragraph in Logseq is preceded by a bullet (-). Need more than a single paragraph? Create branches by grouping related blocks.
 
@@ -54,3 +56,4 @@ Unless I specify otherwise, write up notes based on the current chat context (e.
 7. Report times in EST even if logs are in UTC.
 8. Always remember to clean up after yourself, especially with temporary files or directories.
 9. **Emacs daemon restart**: If the Emacs client/daemon is killed or needs restarting, use `osascript -e 'tell application "Emacs" to activate'` to properly restart the Emacs.app and daemon.
+- CRITICAL: DO NOT ADD functionality unless explicitly told to, try to EDIT existing functions first after reviewing the codebase to avoid duplicative code. DO NOT write new tests when you can re-use existing ones.

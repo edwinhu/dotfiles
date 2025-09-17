@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/evil-collection/modes/indium/evil-collection-indium.el

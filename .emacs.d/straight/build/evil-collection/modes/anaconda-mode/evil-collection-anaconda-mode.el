@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/evil-collection/modes/anaconda-mode/evil-collection-anaconda-mode.el

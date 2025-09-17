@@ -20,6 +20,63 @@
 (setq doom-font (font-spec :family "JetBrains Mono" :size 13.0 :dpi 96 :weight 'regular)
       doom-variable-pitch-font (font-spec :family "CMU Serif" :size 13.0 :dpi 96))
 
+;; PROPER FIX: Work with Doom's font system instead of fighting it
+;; The issue: Doom's font system in doom-ui.el overrides manual fontset configurations
+;; Solution: Use Doom's variables and hook into their system properly
+
+;; Step 1: Configure Doom's font variables to prevent emoji font usage
+(setq use-default-font-for-symbols nil
+      inhibit-compacting-font-caches t)
+
+;; Step 2: Set doom-symbol-font to prioritize monospace font for symbols
+(setq doom-symbol-font (font-spec :family "JetBrains Mono"
+                                  :size 13
+                                  :registry "iso10646-1"))
+
+;; Step 3: Disable emoji font entirely by setting it to nil AND clearing fallbacks
+;; This prevents Doom from setting up emoji fonts in the first place
+(setq doom-emoji-font nil
+      ;; CRITICAL: Also clear the fallback list so Doom can't find Apple Color Emoji
+      doom-emoji-fallback-font-families nil)
+
+;; Step 4: Define function to fix problematic symbols after Doom's font setup
+(defun +doom-fix-symbol-fonts-h ()
+  "Fix unicode symbol rendering by forcing specific symbols to use monospace font.
+This runs AFTER Doom's font setup to override emoji fallbacks."
+  (when (display-graphic-p)
+    ;; CRITICAL: Include registry to ensure proper font resolution
+    (let ((mono-font (font-spec :family "JetBrains Mono"
+                               :size 13
+                               :registry "iso10646-1")))
+      ;; Override specific problematic characters that often render as emoji
+      (dolist (char '(?⏺ ?✳ ?▶ ?◀ ?■ ?□ ?● ?○ ?★ ?☆ ?◆ ?◇ ?▪ ?▫ ?⚠ ?⚙ ?→ ?← ?↑ ?↓))
+        (set-fontset-font t char mono-font nil 'prepend))
+
+      ;; Override key Unicode ranges to prevent emoji fallback
+      (dolist (range '((#x25A0 . #x25FF)  ; Geometric Shapes
+                       (#x2600 . #x26FF)  ; Miscellaneous Symbols (includes ⚠ ⚙)
+                       (#x2190 . #x21FF)  ; Arrows
+                       (#x2500 . #x257F))) ; Box Drawing
+        (set-fontset-font t range mono-font nil 'prepend))
+
+      (message "Fixed unicode symbol fonts to use monospace"))))
+
+;; Step 5: Hook into Doom's font system properly
+;; This ensures our fixes run AFTER Doom sets up its emoji/symbol fonts
+(add-hook 'after-setting-font-hook #'+doom-fix-symbol-fonts-h)
+
+;; Step 5.5: Additional safeguard - override Doom's emoji font initialization
+;; This advice runs before Doom's font initialization to ensure clean state
+(defadvice! +doom-prevent-emoji-fonts-a (&rest _)
+  "Prevent Doom from setting up emoji fonts by clearing fallback families."
+  :before #'doom-init-fonts-h
+  (setq doom-emoji-font nil
+        doom-emoji-fallback-font-families nil))
+
+;; Step 6: Also run after doom themes load (themes can affect fonts)
+(after! doom-themes
+  (+doom-fix-symbol-fonts-h))
+
 ;; There are two ways to load a theme. Both assume the theme is installed and
 ;; available. You can either set `doom-theme' or manually load a theme with the
 ;; `load-theme' function. This is the default:
@@ -91,6 +148,7 @@
 
 ;; Claude Code IDE configuration (moved to separate file for better organization)
 (load! "claude-code-config")
+
 
 ;; Load SAS org-babel integration
 (load! "ob-sas")

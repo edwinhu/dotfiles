@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/evil-collection/modes/kotlin-mode/evil-collection-kotlin-mode.el

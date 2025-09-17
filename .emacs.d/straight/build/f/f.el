@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/f.el/f.el

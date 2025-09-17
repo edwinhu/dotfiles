@@ -219,21 +219,6 @@
     "l" '(org-store-link :which-key "Store link")
     "i" '(org-insert-link :which-key "Insert link")))
 
-;; Vertico - Better minibuffer completion
-(use-package vertico
-  :init
-  (vertico-mode)
-  :config
-  (setq vertico-cycle t))
-
-;; Vertico Posframe - Show vertico in a child frame
-(use-package vertico-posframe
-  :config
-  (setq vertico-posframe-parameters
-        '((left-fringe . 8)
-          (right-fringe . 8)))
-  (vertico-posframe-mode 1))
-
 ;; Orderless - Flexible completion style
 (use-package orderless
   :config
@@ -249,6 +234,43 @@
 ;; Consult - Enhanced search and navigation
 (use-package consult)
 
+;; Embark - Action-based completion interface
+(use-package embark
+  :init
+  ;; Optionally replace the key help with a completing-read interface
+  (setq prefix-help-command #'embark-prefix-help-command)
+  :config
+  ;; Hide the mode line of the Embark live/completions buffers
+  (add-to-list 'display-buffer-alist
+               '("\\`\\*Embark Collect \\(Live\\|Completions\\)\\*"
+                 nil
+                 (window-parameters (mode-line-format . none)))))
+
+;; Embark-Consult integration
+(use-package embark-consult
+  :hook
+  (embark-collect-mode . consult-preview-at-point-mode))
+
+;; Vertico - Better minibuffer completion
+(use-package vertico
+  :init
+  (vertico-mode)
+  ;; Enable multiform mode
+  (vertico-multiform-mode)
+  :config
+  (setq vertico-cycle t)
+    ;; Configure the display per completion category
+    (setq vertico-multiform-categories
+          '((embark-keybinding grid))))
+
+;; Vertico Posframe - Show vertico in a child frame
+(use-package vertico-posframe
+  :config
+  (setq vertico-posframe-parameters
+        '((vertico-posframe-border-width . 10)
+          (left-fringe . 8)
+          (right-fringe . 8)))
+  (vertico-posframe-mode 1))
 ;; Company Mode - Text completion framework
 (use-package company
   :straight (:host github :repo "company-mode/company-mode")

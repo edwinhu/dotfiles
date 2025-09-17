@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/claude-code-ide.el/claude-code-ide-mcp.el

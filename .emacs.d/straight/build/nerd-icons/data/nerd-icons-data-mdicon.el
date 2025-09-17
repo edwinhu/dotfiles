@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/nerd-icons.el/data/nerd-icons-data-mdicon.el

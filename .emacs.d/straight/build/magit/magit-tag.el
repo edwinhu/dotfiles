@@ -1,0 +1,1 @@
+/Users/vwh7mb/.emacs.d/straight/repos/magit/lisp/magit-tag.el

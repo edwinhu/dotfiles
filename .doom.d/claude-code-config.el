@@ -6,78 +6,15 @@
 
 ;;; Code:
 
-;; Aggressive font configuration for Claude Code IDE output
-;; Forces technical symbols to render as monospace instead of colorful emoji
+;; Font priority configuration for Claude Code IDE output
+;; Uses font priority system instead of explicit character overrides
 
-(defun +claude-force-monospace-symbols ()
-  "Force technical symbols to use JetBrains Mono instead of colorful emoji.
-Uses the original proven approach from the GitHub issue with comprehensive coverage."
-  (when (fboundp 'set-fontset-font)
-    (let ((mono-font "JetBrains Mono"))
-      ;; Technical Symbols (U+2300-U+23FF) - Includes ⏸ ⏹ ⏺ ⏻ ⏼ ⏽ etc.
-      (set-fontset-font t '(#x2300 . #x23ff) mono-font)
-      
-      ;; Geometric Shapes (U+25A0-U+25FF) - Includes ■ □ ▲ △ ▶ ▷ ◀ ◁ ● ○ etc.
-      (set-fontset-font t '(#x25a0 . #x25ff) mono-font)
-      
-      ;; Box Drawing (U+2500-U+257F) - Includes ─ │ ┌ ┐ └ ┘ ├ ┤ etc.
-      (set-fontset-font t '(#x2500 . #x257f) mono-font)
-      
-      ;; Block Elements (U+2580-U+259F) - Includes ▀ ▄ █ ▌ ▐ etc.
-      (set-fontset-font t '(#x2580 . #x259f) mono-font)
-      
-      ;; Arrows (U+2190-U+21FF) - Includes ← → ↑ ↓ ↔ ↕ etc.
-      (set-fontset-font t '(#x2190 . #x21ff) mono-font)
-      
-      ;; Mathematical Operators (U+2200-U+22FF) - Includes ∀ ∂ ∃ ∅ ∇ ∈ etc.
-      (set-fontset-font t '(#x2200 . #x22ff) mono-font)
-      
-      ;; Miscellaneous Symbols (U+2600-U+26FF) - CRITICAL for ⚡ ⚙ ⚠ etc.
-      (set-fontset-font t '(#x2600 . #x26ff) mono-font)
-      
-      ;; Dingbats (U+2700-U+27BF) - CRITICAL for ✓ ✗ ✅ ❌ etc.
-      (set-fontset-font t '(#x2700 . #x27bf) mono-font)
-      
-      ;; Supplemental Arrows-A (U+27F0-U+27FF)
-      (set-fontset-font t '(#x27f0 . #x27ff) mono-font)
-      
-      ;; Supplemental Arrows-B (U+2900-U+297F)
-      (set-fontset-font t '(#x2900 . #x297f) mono-font)
-      
-      ;; Miscellaneous Symbols and Arrows (U+2B00-U+2BFF) - Includes ⬅ ⬆ ⬇ ⭐ ⭕ etc.
-      (set-fontset-font t '(#x2b00 . #x2bff) mono-font)
-      
-      ;; Individual problematic characters that still might slip through
-      (dolist (char '(?⏸ ?⏹ ?⏺ ?⏻ ?⏼ ?⏽  ; Media controls
-                      ?✓ ?✗ ?✦ ?✧ ?✳      ; Check marks (basic)
-                      ?▶ ?◀ ?▲ ?▼ ?◆ ?◇    ; Triangles and diamonds
-                      ?● ?○ ?■ ?□ ?▪ ?▫    ; Circles and squares
-                      ?⚡ ?⚠ ?⚙ ?⚛         ; Warning and tech symbols
-                      ?⬅ ?➡ ?⬆ ?⬇         ; Bold arrows
-                      ?⭐ ?⭕))             ; Star and circle
-        (set-fontset-font t char mono-font))
-      
-      ;; Extra aggressive approach for the most stubborn emoji characters
-      ;; These characters have strong emoji variants that resist normal fontset overrides
-      (dolist (char '(?✅ ?❌))  ; Heavy checkmark and cross mark
-        (set-fontset-font t char mono-font nil 'prepend)
-        (set-fontset-font "fontset-default" char mono-font nil 'prepend)
-        ;; Force these specific characters by removing emoji font association
-        (set-fontset-font t char mono-font))
-      
-      (message "Claude Code: Applied comprehensive monospace font overrides"))))
-
-;; Apply font configuration immediately and on font changes
-(+claude-force-monospace-symbols)
-(add-hook 'after-setting-font-hook #'+claude-force-monospace-symbols)
-
-;; Also run after Doom loads to override any emoji font settings
-(after! doom-themes
-  (+claude-force-monospace-symbols))
+;; Font configuration moved to config.el for more aggressive handling
+;; This section now focuses only on Claude Code specific UI elements
 
 ;; Unicode testing function for Claude Code IDE
 (defun unicode-test-claude-code ()
-  "Test Unicode rendering that's commonly problematic in Claude Code output.
+  "Test Unicode rendering that is commonly problematic in Claude Code output.
 Creates a test buffer with characters that often get rendered as emoji."
   (interactive)
   (let ((buf (get-buffer-create "*Claude Code Unicode Test*")))
@@ -88,11 +25,11 @@ Creates a test buffer with characters that often get rendered as emoji."
       (insert (format "Font: %s\n\n" (face-attribute 'default :font)))
       
       (insert "=== Common Claude Code Output Symbols ===\n")
-      (insert "Record/Status: ⏺ ✅ ❌ ⚠ ✓ ✗\n")
-      (insert "Navigation: ▶ ◀ ▲ ▼ → ← ↑ ↓\n") 
-      (insert "Progress: ■ □ ● ○ ★ ☆\n")
-      (insert "Technical: ⚡ ⚙ 💡 🔧 📁 📂\n")
-      (insert "Shapes: ◆ ◇ ▪ ▫ ⭐ ⭕\n\n")
+      (insert "Record/Status: * [OK] [ERR] [WARN] + -\n")
+      (insert "Navigation: > < ^ v -> <- ^ v\n")
+      (insert "Progress: # O * o * O\n")
+      (insert "Technical: ! @ * # $ %\n")
+      (insert "Shapes: # O + - * O\n\n")
       
       (insert "=== Expected Rendering ===\n")
       (insert "All symbols above should be monospace, not colorful emoji.\n")
@@ -100,15 +37,21 @@ Creates a test buffer with characters that often get rendered as emoji."
       (insert "If you see colorful emoji instead, the Unicode fix needs adjustment.\n\n")
       
       (insert "=== Test String for Claude Code ===\n")
-      (insert "⏺ Starting analysis... ✓ Processing files ▶ Running tests\n")
-      (insert "⚡ Performance: 95% ● Status: Active ⭐ Rating: Excellent\n")
-      (insert "📁 Files processed: 42 ⚙ Operations completed ✅ Success!\n"))
+      (insert "* Starting analysis... + Processing files > Running tests\n")
+      (insert "! Performance: 95% * Status: Active * Rating: Excellent\n")
+      (insert "# Files processed: 42 @ Operations completed + Success!\n"))
     (pop-to-buffer buf)
     (goto-char (point-min))
     (message "Unicode test buffer created. Check if symbols are monospace, not emoji.")))
 
 ;; Add keybinding for Unicode testing (Claude Code IDE specific)
 (global-set-key (kbd "C-c u") #'unicode-test-claude-code)
+
+(defun claude-code-get-symbol (type)
+  "Get a reliable monospace symbol for Claude Code output.
+TYPE can be: record, bullet, hollow, star, star-filled, star-hollow"
+  (or (cdr (assq type claude-code-monospace-symbols))
+      (error "Unknown symbol type: %s" type)))
 
 ;; Prevent global whitespace mode issues in terminals (Claude Code IDE specific)
 (after! whitespace
@@ -130,10 +73,7 @@ Creates a test buffer with characters that often get rendered as emoji."
       :desc "Claude Code AI" "a" #'claude-code-ide-menu)
 
 ;; Termint configuration for better REPL integration with vterm backend
-(use-package termint
-  :demand t
-  :after vterm
-  :config
+(after! termint
   ;; Ensure vterm is loaded first
   (require 'vterm)
   ;; Use vterm as backend for proper terminal emulation
@@ -149,7 +89,7 @@ Creates a test buffer with characters that often get rendered as emoji."
                 (setq-local nobreak-char-display nil))))
   
   ;; Configure Claude Code with termint for better multi-line handling
-  (termint-define "claude-code" "claude" 
+  (termint-define "claude-code" "claude"
     :bracketed-paste-p t
     :send-delayed-final-ret t
     :source-syntax "@{{file}}")
@@ -158,7 +98,9 @@ Creates a test buffer with characters that often get rendered as emoji."
   (defun termint-claude-code-continue ()
     "Continue most recent Claude Code conversation using termint."
     (interactive)
-    (if-let ((buffer (get-buffer "*claude-code*")))
+    (if-let ((buffer (seq-find (lambda (b)
+                                 (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                               (buffer-list))))
         (switch-to-buffer buffer)
       (progn
         (termint-claude-code-start)
@@ -168,7 +110,9 @@ Creates a test buffer with characters that often get rendered as emoji."
   (defun termint-claude-code-resume ()
     "Resume Claude Code session from previous conversation using termint."
     (interactive)
-    (if-let ((buffer (get-buffer "*claude-code*")))
+    (if-let ((buffer (seq-find (lambda (b)
+                                 (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                               (buffer-list))))
         (switch-to-buffer buffer)
       (progn
         (termint-claude-code-start)
@@ -178,30 +122,38 @@ Creates a test buffer with characters that often get rendered as emoji."
   (defun termint-claude-code-quit ()
     "Stop current Claude Code session."
     (interactive)
-    (when-let ((buffer (get-buffer "*claude-code*")))
+    (when-let ((buffer (seq-find (lambda (b)
+                                   (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                                 (buffer-list))))
       (kill-buffer buffer)))
       
   (defun termint-claude-code-list ()
     "List all Claude Code sessions."
     (interactive)
-    (message "Active Claude Code sessions: %s" 
-             (mapcar #'buffer-name 
-                     (seq-filter (lambda (b) 
-                                   (string-match-p "claude-code" (buffer-name b)))
+    (message "Active Claude Code sessions: %s"
+             (mapcar #'buffer-name
+                     (seq-filter (lambda (b)
+                                   (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
                                  (buffer-list)))))
   
   (defun termint-claude-code-switch-to-buffer ()
     "Switch to Claude Code buffer."
     (interactive)
-    (if-let ((buffer (get-buffer "*claude-code*")))
+    (if-let ((buffer (seq-find (lambda (b)
+                                 (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                               (buffer-list))))
         (switch-to-buffer buffer)
       (termint-claude-code-start)))
       
   (defun termint-claude-code-toggle-window ()
     "Toggle Claude Code window visibility."
     (interactive)
-    (if-let ((window (get-buffer-window "*claude-code*")))
-        (delete-window window)
+    (if-let ((buffer (seq-find (lambda (b)
+                                 (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                               (buffer-list))))
+        (if-let ((window (get-buffer-window buffer)))
+            (delete-window window)
+          (switch-to-buffer buffer))
       (termint-claude-code-switch-to-buffer)))
       
   (defun termint-claude-code-send-prompt ()
@@ -231,7 +183,9 @@ Creates a test buffer with characters that often get rendered as emoji."
   (defun termint-claude-code-yolo ()
     "Start Claude Code with yolo (bypass permissions) using termint."
     (interactive)
-    (if-let ((buffer (get-buffer "*claude-code*")))
+    (if-let ((buffer (seq-find (lambda (b)
+                                 (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                               (buffer-list))))
         (progn
           (switch-to-buffer buffer)
           (termint-claude-code-send-string "claude --dangerously-skip-permissions"))
@@ -243,7 +197,9 @@ Creates a test buffer with characters that often get rendered as emoji."
   (defun termint-claude-code-yolo-continue ()
     "Continue Claude Code conversation with yolo permissions using termint."
     (interactive)
-    (if-let ((buffer (get-buffer "*claude-code*")))
+    (if-let ((buffer (seq-find (lambda (b)
+                                 (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                               (buffer-list))))
         (progn
           (switch-to-buffer buffer)
           (termint-claude-code-send-string "claude --dangerously-skip-permissions --continue"))
@@ -255,7 +211,9 @@ Creates a test buffer with characters that often get rendered as emoji."
   (defun termint-claude-code-yolo-resume ()
     "Resume Claude Code session with yolo permissions using termint."
     (interactive)
-    (if-let ((buffer (get-buffer "*claude-code*")))
+    (if-let ((buffer (seq-find (lambda (b)
+                                 (string-match-p "\\*claude-code\\(\\[.*\\]\\)?\\*" (buffer-name b)))
+                               (buffer-list))))
         (progn
           (switch-to-buffer buffer)
           (termint-claude-code-send-string "claude --dangerously-skip-permissions --resume"))
@@ -347,8 +305,10 @@ Creates a test buffer with characters that often get rendered as emoji."
         ("Y" "YOLO (Bypass Permissions)" claude-code-ide-yolo-menu)
         ("C" "Configuration" claude-code-ide-config-menu)
         ("d" "Debugging" claude-code-ide-debug-menu)]]))
-  
+
   (message "termint: Claude Code integration configured with vterm backend"))
+
+;; End of after! termint block
 
 (provide 'claude-code-config)
 ;;; claude-code-config.el ends here

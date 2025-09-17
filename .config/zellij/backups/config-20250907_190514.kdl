@@ -1,0 +1,202 @@
+// Zellij Configuration with nvim-friendly keybindings
+// Uses Ctrl+s as leader to avoid conflicts with nvim Ctrl+hjkl navigation
+
+// Custom keybindings commented out to test Zellij defaults
+// Uncomment and modify as needed
+/*
+keybinds {
+    // Normal mode - only essential custom bindings
+    normal {
+        // Main leader key - Ctrl+s (matches WezTerm)
+        bind "Ctrl s" { SwitchToMode "tmux"; }
+    }
+    
+    // Locked mode for when you want zellij completely out of the way
+    locked {
+        bind "Ctrl s" { SwitchToMode "normal"; }
+    }
+
+    // Main mode - matching WezTerm keybindings with Ctrl+s leader
+    tmux {
+        bind "Ctrl s" { Write 19; }  // Send literal Ctrl+s if pressed twice
+        bind "q" { Quit; }
+        bind "[" { SwitchToMode "scroll"; }  // Copy mode (matches WezTerm)
+        
+        // Tab management
+        bind "c" { NewTab; SwitchToMode "normal"; }
+        bind "," { SwitchToMode "renametab"; }  // Rename tab (matches WezTerm)
+        bind "p" { GoToPreviousTab; SwitchToMode "normal"; }
+        bind "n" { GoToNextTab; SwitchToMode "normal"; }
+        bind "1" { GoToTab 1; SwitchToMode "normal"; }
+        bind "2" { GoToTab 2; SwitchToMode "normal"; }
+        bind "3" { GoToTab 3; SwitchToMode "normal"; }
+        bind "4" { GoToTab 4; SwitchToMode "normal"; }
+        bind "5" { GoToTab 5; SwitchToMode "normal"; }
+        bind "6" { GoToTab 6; SwitchToMode "normal"; }
+        bind "7" { GoToTab 7; SwitchToMode "normal"; }
+        bind "8" { GoToTab 8; SwitchToMode "normal"; }
+        bind "9" { GoToTab 9; SwitchToMode "normal"; }
+        
+        // Pane operations (matching WezTerm)
+        bind "-" { NewPane "Down"; SwitchToMode "normal"; }     // Vertical split (matches WezTerm)
+        bind "\\" { NewPane "Right"; SwitchToMode "normal"; }    // Horizontal split (matches WezTerm)  
+        bind "i" { SwitchToMode "pane"; }                        // Pane select (matches WezTerm)
+        bind "x" { CloseFocus; SwitchToMode "normal"; }
+        bind "z" { ToggleFocusFullscreen; SwitchToMode "normal"; }
+        
+        // Pane navigation (matching WezTerm)
+        bind "h" { MoveFocus "Left"; }
+        bind "j" { MoveFocus "Down"; }
+        bind "k" { MoveFocus "Up"; }
+        bind "l" { MoveFocus "Right"; }
+        
+        // Session management with enhanced sessionizer
+        bind "w" {
+            Run "/Users/vwh7mb/dotfiles/scripts/zellij-sessionizer-improved.sh" {
+                floating true
+                width "80%"
+                height "70%"
+                x "10%"
+                y "15%"
+                close_on_exit true
+            }
+            SwitchToMode "normal"
+        }
+        bind "d" { Detach; }
+        
+        bind "Ctrl s" { SwitchToMode "normal"; }
+    }
+
+    renametab {
+        bind "Ctrl c" { SwitchToMode "normal"; }
+        bind "Esc" { UndoRenameTab; SwitchToMode "tmux"; }
+    }
+
+    renamepane {
+        bind "Ctrl c" { SwitchToMode "normal"; }
+        bind "Esc" { UndoRenamePane; SwitchToMode "tmux"; }
+    }
+
+    scroll {
+        bind "Ctrl s" { SwitchToMode "normal"; }
+        bind "e" { EditScrollback; SwitchToMode "normal"; }
+        bind "s" { SwitchToMode "entersearch"; SearchInput 0; }
+        bind "Ctrl c" { ScrollToBottom; SwitchToMode "normal"; }
+        bind "j" "Down" { ScrollDown; }
+        bind "k" "Up" { ScrollUp; }
+        bind "Ctrl f" "PageDown" { PageScrollDown; }
+        bind "Ctrl b" "PageUp" { PageScrollUp; }
+        bind "d" { HalfPageScrollDown; }
+        bind "u" { HalfPageScrollUp; }
+    }
+
+    search {
+        bind "Ctrl s" { SwitchToMode "normal"; }
+        bind "j" "Down" { ScrollDown; }
+        bind "k" "Up" { ScrollUp; }
+        bind "Ctrl f" "PageDown" { PageScrollDown; }
+        bind "Ctrl b" "PageUp" { PageScrollUp; }
+        bind "d" { HalfPageScrollDown; }
+        bind "u" { HalfPageScrollUp; }
+        bind "n" { Search "down"; }
+        bind "p" { Search "up"; }
+    }
+
+    entersearch {
+        bind "Ctrl c" "Esc" { SwitchToMode "scroll"; }
+        bind "Enter" { SwitchToMode "search"; }
+    }
+
+    pane {
+        bind "Ctrl s" { SwitchToMode "normal"; }
+        bind "h" "Left" { MoveFocus "Left"; }
+        bind "l" "Right" { MoveFocus "Right"; }
+        bind "j" "Down" { MoveFocus "Down"; }
+        bind "k" "Up" { MoveFocus "Up"; }
+        bind "p" { SwitchToMode "normal"; }
+        bind "n" { NewPane; SwitchToMode "normal"; }
+        bind "d" { NewPane "Down"; SwitchToMode "normal"; }
+        bind "r" { NewPane "Right"; SwitchToMode "normal"; }
+        bind "x" { CloseFocus; SwitchToMode "normal"; }
+        bind "z" { ToggleFocusFullscreen; SwitchToMode "normal"; }
+        bind "[" { SwitchToMode "scroll"; }
+        bind "c" { SwitchToMode "renamepane"; PaneNameInput 0; }
+        bind "w" { TogglePaneFrames; SwitchToMode "normal"; }
+        bind "Enter" { SwitchToMode "normal"; }
+    }
+
+    session {
+        bind "Ctrl s" { SwitchToMode "normal"; }
+        bind "d" { Detach; }
+    }
+}
+*/
+
+// Plugin configuration
+plugins {
+    tab-bar location="zellij:tab-bar"
+    status-bar location="zellij:status-bar"
+    strider location="zellij:strider"
+    compact-bar location="zellij:compact-bar"
+    session-manager location="zellij:session-manager"
+}
+
+// UI configuration  
+ui {
+    pane_frames {
+        rounded_corners true
+        hide_session_name false
+    }
+}
+
+// Use fallback layout with built-in status bar
+default_layout "fallback"
+
+// Use catppuccin-mocha theme
+theme "catppuccin-mocha"
+
+// Show UI elements and command hints
+simplified_ui false
+
+// Show pane frames
+pane_frames true
+
+// Display command hints in status bar
+display_pane_names true
+
+// Default shell
+default_shell "zsh"
+
+// Auto layout - split right by default for new panes
+auto_layout true
+
+// Session configuration
+session_serialization false
+pane_viewport_serialization false
+
+// Copy settings
+copy_command "pbcopy"
+copy_clipboard "primary"
+
+// Mouse mode
+mouse_mode true
+
+// Scroll buffer size
+scroll_buffer_size 10000
+
+// Themes
+themes {
+    catppuccin-mocha {
+        bg "#1e1e2e"       // base
+        fg "#cdd6f4"       // text
+        red "#f38ba8"      // red
+        green "#89b4fa"    // blue (changed for borders)
+        blue "#89b4fa"     // blue
+        yellow "#f9e2af"   // yellow
+        magenta "#cba6f7"  // mauve
+        orange "#fab387"   // peach
+        cyan "#89dceb"     // sky
+        black "#181825"    // mantle
+        white "#f5e0dc"    // rosewater
+    }
+}
